@@ -16,10 +16,36 @@ from utils import *
 DATAFRAME_FILE = "./calibration_database.pkl"
 MAX_ATTEMPTS = 3
 AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
-FREQUENCY_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
+Q_FREQUENCY_CHANGE_THRESHOLD = 1200  # 1.2 kHz tolerated
+RR_FREQUENCY_CHANGE_THRESHOLD = 10_000  # 10 kHz tolerated
 READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
+READOUT_DURATION_CHANGE_THRESHOLD = 0.05  # 5% deviation tolerated
+
+# Controls which calibration parameters are actively updated.
+SEARCH_PARAMETER_NAMES = [
+    'pi_amplitude', 
+    'pi_half_amplitude', 
+    'IF', 
+    # 'readout_amplitude',
+    'readout_duration',
+    'readout_frequency',
+    'readout_weights',
+]
+# Account for slight difference in naming convention
+SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
+    'pi_amplitude': 'pi_amplitude', 
+    'pi_half_amplitude': 'pi_half_amplitude', 
+    'IF': 'IF', 
+    'readout_amplitude': 'amplitude',
+    'readout_duration': 'readout_length',
+    'readout_frequency': 'IF',
+}
 
 class Node: 
+    # Class variable shared by all instances, loaded from a file.
+    # This way, we only have to load the dataframe once
+    shared_dataframe = pd.read_pickle(DATAFRAME_FILE)
+
     def __init__(
         self,
         calibration_parameter_name: str,
@@ -44,7 +70,7 @@ class Node:
         self.miscellaneous = {}
         self.current_qubit = ''
         self.calibration_success = False
-        self.loaded_database = pd.read_pickle(DATAFRAME_FILE)
+        self.loaded_database = Node.shared_dataframe
         self.exception_log = []
         self.update_calibration_config = update_calibration_config
 
@@ -97,9 +123,27 @@ class Node:
         return
     
         
-    def success_condition(self, calibration_value):
-        self.calibration_success = True
-        # raise Exception('Success condition must be defined by Node child class')
+    def success_condition(
+            self, 
+            calibration_value: float,
+            threshold: float,
+            percent_change_bool: bool = True
+    ):
+        self.calibration_success = False
+        previous_calibration_value = self.loaded_database.loc[
+            (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
+            (self.loaded_database.qubit_name == self.current_qubit) &
+            (self.loaded_database.calibration_success == True)
+        ].iloc[-1]['calibration_value']
+
+        if percent_change_bool:
+            change = np.abs(calibration_value - previous_calibration_value)/previous_calibration_value
+        else:
+            change = np.abs(calibration_value - previous_calibration_value)
+
+
+        if change < threshold:
+            self.calibration_success = True
     
 
     def calibration_measurement(self):
@@ -131,43 +175,24 @@ class Node:
 
             with open('calibration_data_dict.json', 'r') as json_file:
                 cal_dict = json.load(json_file)
-                
-            search_parameter_names = [
-                'pi_amplitude', 
-                'pi_half_amplitude', 
-                'IF', 
-                'readout_amplitude',
-                'readout_duration',
-                'readout_frequency',
-                'readout_weights',
-            ]
-
-            key_correspondence = {
-                'pi_amplitude': 'pi_amplitude', 
-                'pi_half_amplitude': 'pi_half_amplitude', 
-                'IF': 'IF', 
-                'readout_amplitude': 'amplitude',
-                'readout_duration': 'readout_length',
-                'readout_frequency': 'IF',
-            }
 
             for qubit in QUBIT_CONSTANTS.keys():
                 try:
                     database = pull_latest_calibrated_values(
                         qubit=qubit,
-                        search_parameter_names=search_parameter_names,
+                        SEARCH_PARAMETER_NAMES=SEARCH_PARAMETER_NAMES,
                     )
                 except Exception as e:
                     print(e)
                 # Overwrite with new calbirated values
-                for param in search_parameter_names:
+                for param in SEARCH_PARAMETER_NAMES:
                     if param in ['readout_weights']:
                         continue
                     # print(database.loc[database.calibration_parameter_name == param]['calibration_value'].values[0])
                     if 'readout' in param:
-                        cal_dict['RR_CONSTANTS'][qubit_resonator_correspondence[qubit]][key_correspondence[param]] = database.loc[database.calibration_parameter_name == param]['calibration_value'].values[0]
+                        cal_dict['RR_CONSTANTS'][qubit_resonator_correspondence[qubit]][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = database.loc[database.calibration_parameter_name == param]['calibration_value'].values[0]
                     else:
-                        cal_dict['QUBIT_CONSTANTS'][qubit][key_correspondence[param]] = database.loc[database.calibration_parameter_name == param]['calibration_value'].values[0]
+                        cal_dict['QUBIT_CONSTANTS'][qubit][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = database.loc[database.calibration_parameter_name == param]['calibration_value'].values[0]
 
             with open('calibration_data_dict.json', 'w') as json_file:
                 json.dump(cal_dict, fp=json_file)
@@ -203,20 +228,6 @@ class Qubit_Amplitude_Node(Node):
         self.a_max = a_max
 
 
-    # def success_condition(self, calibration_value):
-    #     self.calibration_success = False
-    #     previous_calibration_value = self.loaded_database.loc[
-    #         (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-    #         (self.loaded_database.qubit_name == self.current_qubit) &
-    #         (self.loaded_database.calibration_success == True)
-    #     ].iloc[-1]['calibration_value']
-
-    #     fractional_change = np.abs(calibration_value - previous_calibration_value)/previous_calibration_value
-
-    #     if fractional_change < AMPLITUDE_CHANGE_THRESHOLD:
-    #         self.calibration_success = True
-
-
     def calibration_measurement(self):
         """
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
@@ -235,7 +246,7 @@ class Qubit_Amplitude_Node(Node):
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.calibration_value = fit_dict['fit_values']['center']*fit_dict['original_amplitude']
-        self.success_condition(self.calibration_value)
+        self.success_condition(self.calibration_value, AMPLITUDE_CHANGE_THRESHOLD)
         self.save_to_database()
         return fit_dict
 
@@ -268,20 +279,6 @@ class Qubit_Frequency_Node(Node):
         self.taus = taus
 
 
-    # def success_condition(self, calibration_value):
-    #     self.calibration_success = False
-    #     previous_calibration_value = self.loaded_database.loc[
-    #         (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-    #         (self.loaded_database.qubit_name == self.current_qubit) &
-    #         (self.loaded_database.calibration_success == True)
-    #     ].iloc[-1]['calibration_value']
-
-    #     fractional_change = np.abs(calibration_value - previous_calibration_value)/previous_calibration_value
-
-    #     if fractional_change < FREQUENCY_CHANGE_THRESHOLD:
-    #         self.calibration_success = True
-
-
     def calibration_measurement(self):
         """
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
@@ -298,7 +295,7 @@ class Qubit_Frequency_Node(Node):
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.calibration_value = QUBIT_CONSTANTS[self.current_qubit]["IF"] + fit_dict['qubit_detuning']
-        self.success_condition(self.calibration_value)
+        self.success_condition(self.calibration_value, Q_FREQUENCY_CHANGE_THRESHOLD, False)
         self.save_to_database()
         return fit_dict
 
@@ -326,20 +323,6 @@ class Resonator_Amplitude_Node(Node):
         self.n_avg = n_avg
 
 
-    # def success_condition(self, calibration_value):
-    #     self.calibration_success = False
-    #     previous_calibration_value = self.loaded_database.loc[
-    #         (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-    #         (self.loaded_database.qubit_name == self.current_qubit) &
-    #         (self.loaded_database.calibration_success == True)
-    #     ].iloc[-1]['calibration_value']
-
-    #     fractional_change = np.abs(calibration_value - previous_calibration_value)/previous_calibration_value
-
-    #     if fractional_change < READOUT_AMPLITUDE_CHANGE_THRESHOLD:
-    #         self.calibration_success = True
-
-
     def calibration_measurement(self):
         """
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
@@ -352,7 +335,7 @@ class Resonator_Amplitude_Node(Node):
         )
         self.experiment_data_location = data_folder
         self.calibration_value = optimal_amplitude
-        self.success_condition(self.calibration_value)
+        self.success_condition(self.calibration_value, 1)
         self.save_to_database()
 
 
@@ -380,20 +363,6 @@ class Resonator_Duration_Node(Node):
         self.n_avg = n_avg
 
 
-    # def success_condition(self, calibration_value):
-    #     self.calibration_success = False
-    #     previous_calibration_value = self.loaded_database.loc[
-    #         (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-    #         (self.loaded_database.qubit_name == self.current_qubit) &
-    #         (self.loaded_database.calibration_success == True)
-    #     ].iloc[-1]['calibration_value']
-
-    #     fractional_change = np.abs(calibration_value - previous_calibration_value)/previous_calibration_value
-
-    #     if fractional_change < READOUT_AMPLITUDE_CHANGE_THRESHOLD:
-    #         self.calibration_success = True
-
-
     def calibration_measurement(self):
         """
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
@@ -406,27 +375,13 @@ class Resonator_Duration_Node(Node):
         )
         self.experiment_data_location = data_folder
         self.calibration_value = opt_readout_length
-        self.success_condition(self.calibration_value)
+        self.success_condition(self.calibration_value, READOUT_DURATION_CHANGE_THRESHOLD)
         self.save_to_database()
 
 
 
 
 class Readout_Frequency_Node(Node):
-
-    # def success_condition(self, calibration_value):
-    #     self.calibration_success = False
-    #     previous_calibration_value = self.loaded_database.loc[
-    #         (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-    #         (self.loaded_database.qubit_name == self.current_qubit) &
-    #         (self.loaded_database.calibration_success == True)
-    #     ].iloc[-1]['calibration_value']
-
-    #     fractional_change = np.abs(calibration_value - previous_calibration_value)/previous_calibration_value
-
-    #     if fractional_change < FREQUENCY_CHANGE_THRESHOLD:
-    #         self.calibration_success = True
-
 
     def calibration_measurement(self):
         """
@@ -441,7 +396,7 @@ class Readout_Frequency_Node(Node):
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.calibration_value = fit_dict['fit_values']['center']
-        self.success_condition(self.calibration_value)
+        self.success_condition(self.calibration_value, RR_FREQUENCY_CHANGE_THRESHOLD, False)
         self.save_to_database()
         return fit_dict
     
