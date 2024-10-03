@@ -3,6 +3,7 @@ import numpy as np
 from typing import *
 from datetime import datetime, timedelta
 
+from IQ_blobs_function import measure_IQ_blobs
 from qubit_power_error_amplification_class import Power_error_amplification
 from ramsey_w_virtual_rotation import Ramsey_w_virtual_rotation, DEFAULT_TAUS
 from readout_amplitude_optimization import readout_amplitude_optimization
@@ -20,16 +21,16 @@ Q_FREQUENCY_CHANGE_THRESHOLD = 1200  # 1.2 kHz tolerated
 RR_FREQUENCY_CHANGE_THRESHOLD = 10_000  # 10 kHz tolerated
 READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
 READOUT_DURATION_CHANGE_THRESHOLD = 0.05  # 5% deviation tolerated
+IQ_THRESHOLD = 0.9  # 90% Readout fidelity tolerated
 
 # Controls which calibration parameters are actively updated.
-SEARCH_PARAMETER_NAMES = [
+UPDATEABLE_PARAMETER_NAMES = [
     'pi_amplitude', 
     'pi_half_amplitude', 
     'IF', 
     # 'readout_amplitude',
     'readout_duration',
     'readout_frequency',
-    'readout_weights',
 ]
 # Account for slight difference in naming convention
 SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
@@ -39,6 +40,7 @@ SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
     'readout_amplitude': 'amplitude',
     'readout_duration': 'readout_length',
     'readout_frequency': 'IF',
+    'readout_fidelity': 'readout_fidelity',
 }
 
 class Node: 
@@ -169,6 +171,30 @@ class Node:
         self.loaded_database.loc[len(self.loaded_database.index)] = new_row
         self.loaded_database.to_pickle(DATAFRAME_FILE)
 
+    
+    def pull_latest_calibrated_values(
+        self,
+        qubit,
+        search_parameter_names,
+        n_latest = 1
+    ):
+
+        df = self.loaded_database
+
+        for i_df, param_name in enumerate(search_parameter_names):
+            
+            dfq = df.loc[
+                (df.calibration_parameter_name == param_name) &
+                (df.qubit_name == qubit) &
+                (df.calibration_success == True)
+            ].iloc[-1*n_latest:]
+            
+            if i_df == 0:
+                df_found = pd.DataFrame(dfq)
+            else:
+                df_found = pd.concat([df_found, dfq], ignore_index=True)
+        return df_found
+
 
     def update_calibration_configuration(self):
         if self.update_calibration_config:
@@ -178,16 +204,14 @@ class Node:
 
             for qubit in QUBIT_CONSTANTS.keys():
                 try:
-                    database = pull_latest_calibrated_values(
+                    database = self.pull_latest_calibrated_values(
                         qubit=qubit,
-                        SEARCH_PARAMETER_NAMES=SEARCH_PARAMETER_NAMES,
+                        search_parameter_names=UPDATEABLE_PARAMETER_NAMES,
                     )
                 except Exception as e:
                     print(e)
                 # Overwrite with new calbirated values
-                for param in SEARCH_PARAMETER_NAMES:
-                    if param in ['readout_weights']:
-                        continue
+                for param in UPDATEABLE_PARAMETER_NAMES:
                     # print(database.loc[database.calibration_parameter_name == param]['calibration_value'].values[0])
                     if 'readout' in param:
                         cal_dict['RR_CONSTANTS'][qubit_resonator_correspondence[qubit]][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = database.loc[database.calibration_parameter_name == param]['calibration_value'].values[0]
@@ -424,3 +448,28 @@ class Readout_Weights_Node(Node):
         self.success_condition()
         self.save_to_database()
         return weights_dict
+    
+
+
+
+class IQ_Blobs_Node(Node):
+
+    def success_condition(self, fidelity: float):
+        self.calibration_success = True if fidelity > IQ_THRESHOLD else False
+        
+
+    def calibration_measurement(self):
+        """
+        NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
+        because the while loop terminates when it becomes True.
+        """
+
+        iq_blobs_dict, data_folder = measure_IQ_blobs(            
+            qubit = self.current_qubit,
+            resonator = qubit_resonator_correspondence[self.current_qubit]
+        )
+        self.experiment_data_location = data_folder
+        self.miscellaneous.update({'iq_blobs_dict': iq_blobs_dict})
+        self.calibration_value = iq_blobs_dict['fidelity']
+        self.success_condition(iq_blobs_dict['fidelity'])
+        self.save_to_database()

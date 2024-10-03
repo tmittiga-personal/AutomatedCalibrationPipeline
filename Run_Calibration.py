@@ -72,6 +72,14 @@ resonator_weights_node = Readout_Weights_Node(
     retry_time = 60*5,
 )
 
+iq_blobs_node = IQ_Blobs_Node(
+    calibration_parameter_name = 'readout_fidelity',
+    qubits_to_calibrate = CALIBRATION_QUBITS,
+    refresh_time = 3600*3,
+    expiration_time = 3600*24,
+    retry_time = 60*5,
+)
+
 ###########
 ### RUN ###
 ###########
@@ -93,6 +101,8 @@ if __name__ == "__main__":
             resonator_duration_node.calibrate()
 
             resonator_weights_node.calibrate()
+
+            iq_blobs_node.calibrate()
 
             time.sleep(60)  # probe if calibration is needed every 60 seconds
         
