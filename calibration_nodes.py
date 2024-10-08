@@ -1,9 +1,10 @@
 import pandas as pd
 import numpy as np
 from typing import *
+import json
 from datetime import datetime, timedelta
 
-from IQ_blobs_function import measure_IQ_blobs
+from IQ_blobs_comparison import IQ_blobs_comparison
 from qubit_power_error_amplification_class import Power_error_amplification
 from ramsey_w_virtual_rotation import Ramsey_w_virtual_rotation, DEFAULT_TAUS
 from readout_amplitude_optimization import readout_amplitude_optimization
@@ -31,6 +32,7 @@ UPDATEABLE_PARAMETER_NAMES = [
     # 'readout_amplitude',
     'readout_duration',
     'readout_frequency',
+    'use_opt_readout',
 ]
 # Account for slight difference in naming convention
 SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
@@ -41,6 +43,7 @@ SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
     'readout_duration': 'readout_length',
     'readout_frequency': 'IF',
     'readout_fidelity': 'readout_fidelity',
+    'use_opt_readout': 'use_opt_readout',
 }
 
 class Node: 
@@ -56,7 +59,7 @@ class Node:
         expiration_time: float,
         retry_time: float,
         fresh: bool = False,
-        update_calibration_config = False,
+        update_calibration_config = True,
     ):
         """
         Base class for calibration nodes. More explanation needed.
@@ -77,10 +80,16 @@ class Node:
         self.update_calibration_config = update_calibration_config
 
 
-    def calibrate(self):
+    def calibrate(
+        self,
+        initialize = False,
+    ):
         """
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
         because the while loop terminates when it becomes True.
+
+        :param initialize: Intended for starting a new calibration node. Set to true to ignore the database entries
+        and just run a measurement and store its result in the database.
         """
         for qubit in self.qubits_to_calibrate:
             # Reset values for new qubit
@@ -89,19 +98,24 @@ class Node:
             self.miscellaneous = {}
             self.calibration_success = False  # If last qubit succeeded, we need this reset
 
-            latest_successful_entry = self.loaded_database.loc[
-                (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-                (self.loaded_database.qubit_name == self.current_qubit) &
-                (self.loaded_database.calibration_success == True)
-            ].iloc[-1]
-            latest_time = latest_successful_entry['timestamp']
-            refresh_time = timedelta(seconds=self.refresh_time)
-            now_time = datetime.now()
+            if not initialize:
+                latest_successful_entry = self.loaded_database.loc[
+                    (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
+                    (self.loaded_database.qubit_name == self.current_qubit) &
+                    (self.loaded_database.calibration_success == True)
+                ].iloc[-1]
+                latest_time = latest_successful_entry['timestamp']
+                refresh_time = timedelta(seconds=self.refresh_time)
+                now_time = datetime.now()
+            else:
+                latest_time = 100
+                refresh_time = 0
+                now_time = 0
 
             i_attempt = 0
             
             # If it's time to refresh this qubit, then run the measurement
-            if latest_time + refresh_time < now_time:
+            if (latest_time + refresh_time < now_time) or initialize:
                 while i_attempt < MAX_ATTEMPTS and not self.calibration_success:
                     # If the last attempt (possibly by another qubit) overwrote these values
                     # we need to reset them
@@ -202,7 +216,7 @@ class Node:
             with open('calibration_data_dict.json', 'r') as json_file:
                 cal_dict = json.load(json_file)
 
-            for qubit in QUBIT_CONSTANTS.keys():
+            for qubit in self.qubits_to_calibrate:
                 try:
                     database = self.pull_latest_calibrated_values(
                         qubit=qubit,
@@ -406,6 +420,8 @@ class Resonator_Duration_Node(Node):
 
 
 class Readout_Frequency_Node(Node):
+    def success_condition(self):
+        self.calibration_success = True
 
     def calibration_measurement(self):
         """
@@ -419,8 +435,8 @@ class Readout_Frequency_Node(Node):
         )
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
-        self.calibration_value = fit_dict['fit_values']['center']
-        self.success_condition(self.calibration_value, RR_FREQUENCY_CHANGE_THRESHOLD, False)
+        self.calibration_value = fit_dict['fit_values']['center'] + RR_CONSTANTS[qubit_resonator_correspondence[self.current_qubit]]['IF']
+        self.success_condition() #self.calibration_value, RR_FREQUENCY_CHANGE_THRESHOLD, False)
         self.save_to_database()
         return fit_dict
     
@@ -464,12 +480,23 @@ class IQ_Blobs_Node(Node):
         because the while loop terminates when it becomes True.
         """
 
-        iq_blobs_dict, data_folder = measure_IQ_blobs(            
+        iq_blobs_dict = IQ_blobs_comparison(            
             qubit = self.current_qubit,
             resonator = qubit_resonator_correspondence[self.current_qubit]
         )
+        
+        if iq_blobs_dict['optimized']['fidelity'] > iq_blobs_dict['rotated']['fidelity']:
+            data_folder = iq_blobs_dict['optimized']['data_folder']
+            fidelity = iq_blobs_dict['optimized']['fidelity']
+            use_opt_readout = True
+        else:
+            data_folder = iq_blobs_dict['rotated']['data_folder']
+            fidelity = iq_blobs_dict['rotated']['fidelity']
+            use_opt_readout = False
+
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'iq_blobs_dict': iq_blobs_dict})
-        self.calibration_value = iq_blobs_dict['fidelity']
-        self.success_condition(iq_blobs_dict['fidelity'])
+        self.calibration_value = use_opt_readout
+        self.success_condition(fidelity)
         self.save_to_database()
+
