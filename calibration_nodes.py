@@ -26,32 +26,6 @@ READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
 READOUT_DURATION_CHANGE_THRESHOLD = 0.05  # 5% deviation tolerated
 IQ_THRESHOLD = 90  # 90% Readout fidelity tolerated
 
-# Controls which calibration parameters are actively updated.
-UPDATEABLE_PARAMETER_NAMES = [
-    'pi_amplitude', 
-    'pi_half_amplitude', 
-    'IF', 
-    'readout_amplitude',
-    'readout_duration',
-    'readout_frequency',
-    # 'use_opt_readout',
-    # 'readout_fidelity', 
-    'readout_angle', 
-    'readout_threshold'
-]
-# Account for slight difference in naming convention. See update_calibration_configuration docstring for details
-SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
-    'pi_amplitude': 'pi_amplitude', 
-    'pi_half_amplitude': 'pi_half_amplitude', 
-    'IF': 'IF', 
-    'readout_amplitude': 'amplitude',
-    'readout_duration': 'readout_length',
-    'readout_frequency': 'IF',
-    'readout_fidelity': 'readout_fidelity',
-    'use_opt_readout': 'use_opt_readout',
-    'readout_angle': 'rotation_angle',
-    'readout_threshold': 'ge_threshold',
-}
 
 class Node: 
     """
@@ -349,7 +323,6 @@ class Node:
         Ideally, all of the Quantum Machines scripts would pull from the database directly. However, this code was 
         initially written to try to minimize the changes needed to the Quantum Machines code, leading to the current
         convoluted structure.
-        TODO: write configuration files to pull from the database directly.
         NOTE: Quantum Machines uses some names for parameters that this author finds to be too vague. So I have used
         slightly different naming in the database vs the QM's configuration files. Because of this, the 
         SEARCH_PARAMETER_KEY_CORRESPONDENCE dictionary translates between the two naming conventions.

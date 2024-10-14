@@ -4,10 +4,18 @@ import json
 from qualang_tools.config.waveform_tools import drag_gaussian_pulse_waveforms
 from qualang_tools.units import unit
 from set_octave import OctaveUnit, octave_declaration
+from utils import *
 
+ALL_QUBIT_NAMES = ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy"]
 # True to overwrite values with automated calbiration values
 # False to use values as written in this file
 use_calibrated_values = True  
+if use_calibrated_values:
+    calibration_dataframe = pull_latest_calibrated_values(
+        qubits=ALL_QUBIT_NAMES,
+        search_parameter_names=UPDATEABLE_PARAMETER_NAMES,
+    )
+
 
 #######################
 # AUXILIARY FUNCTIONS #
@@ -84,7 +92,7 @@ MULTIPLEX_DRIVE_CONSTANTS = {
 
 # Constants for each qubit (replace example values with actual values)
 QUBIT_CONSTANTS = {
-    "q1_xy": {
+    ALL_QUBIT_NAMES[0]: {
         "pi_amplitude": 0.3017, 
         "pi_half_amplitude": 0.3017/2,
         "pi_len": 160,
@@ -95,7 +103,7 @@ QUBIT_CONSTANTS = {
         "ac_stark_shift": 0.0 * u.MHz,
         "IF": -341403900,
     },
-    "q2_xy": {
+    ALL_QUBIT_NAMES[1]: {
         "pi_amplitude": 0.0414,
         "pi_half_amplitude": 0.0414/2,
         "pi_len": PI_LENGTH,
@@ -106,7 +114,7 @@ QUBIT_CONSTANTS = {
         "ac_stark_shift": 0.0 * u.MHz,
         "IF": -88 * u.MHz,
     },
-    "q3_xy": {
+    ALL_QUBIT_NAMES[2]: {
         "pi_amplitude": 0.289,
         "pi_half_amplitude": 0.289/2,
         "pi_len": PI_LENGTH,
@@ -117,7 +125,7 @@ QUBIT_CONSTANTS = {
         "ac_stark_shift": 0.0 * u.MHz,
         "IF": 31.14558 * u.MHz + 0.01 * u.MHz,
     },
-    "q4_xy": {
+    ALL_QUBIT_NAMES[3]: {
         "pi_amplitude": 0.0944/3,
         "pi_half_amplitude": 0.0944/2,
         "pi_len": PI_LENGTH,
@@ -128,7 +136,7 @@ QUBIT_CONSTANTS = {
         "ac_stark_shift": 0.0 * u.MHz,
         "IF": -31 * u.MHz,
     },
-    "q5_xy": {
+    ALL_QUBIT_NAMES[4]: {
         "pi_amplitude": 0.2273,
         "pi_half_amplitude": 0.2273/2,
         "pi_len": PI_LENGTH,
@@ -139,7 +147,7 @@ QUBIT_CONSTANTS = {
         "ac_stark_shift": 0.0 * u.MHz,
         "IF": 141.9014 * u.MHz,
     },
-    "q6_xy": {
+    ALL_QUBIT_NAMES[5]: {
         "pi_amplitude": 0.1797,
         "pi_half_amplitude": 0.1797/2,
         "pi_len": PI_LENGTH,
@@ -152,15 +160,20 @@ QUBIT_CONSTANTS = {
     },
 }
 if use_calibrated_values:
-    with open('calibration_data_dict.json', 'r') as json_file:
-        cal_dict = json.load(json_file)
-        for qubit_key, constants in QUBIT_CONSTANTS.items():
-            for constants_key in constants.keys():
-                if constants_key in cal_dict['QUBIT_CONSTANTS'][qubit_key].keys():
-                    if constants_key in ["pi_amplitude", "pi_half_amplitude"]:
-                        QUBIT_CONSTANTS[qubit_key][constants_key] = cal_dict['QUBIT_CONSTANTS'][qubit_key][constants_key]*amplitude_scaling
-                    else:
-                        QUBIT_CONSTANTS[qubit_key][constants_key] = cal_dict['QUBIT_CONSTANTS'][qubit_key][constants_key]
+    for qubit_key, constants in QUBIT_CONSTANTS.items():
+        for param in UPDATEABLE_PARAMETER_NAMES:
+            if param in ["pi_amplitude", "pi_half_amplitude"]:
+                QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
+                    calibration_dataframe.loc[
+                        (calibration_dataframe.qubit_name == qubit_key) &
+                        (calibration_dataframe.calibration_parameter_name == param)
+                    ]['calibration_value'].values[0]*amplitude_scaling
+            elif param in constants.keys():
+                QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
+                    calibration_dataframe.loc[
+                        (calibration_dataframe.qubit_name == qubit_key) &
+                        (calibration_dataframe.calibration_parameter_name == param)
+                    ]['calibration_value'].values[0]
     print('QUBIT_CONSTANTS pulled from calibration_data_dict.json')
 
 # Relaxation time
@@ -311,12 +324,14 @@ RR_CONSTANTS = {
     },
 }
 if use_calibrated_values:
-    with open('calibration_data_dict.json', 'r') as json_file:
-        cal_dict = json.load(json_file)
-        for rr_key, constants in RR_CONSTANTS.items():
-            for constants_key in constants.keys():
-                if constants_key in cal_dict['RR_CONSTANTS'][rr_key].keys():
-                    RR_CONSTANTS[rr_key][constants_key] = cal_dict['RR_CONSTANTS'][rr_key][constants_key]
+    for qubit_key, constants in RR_CONSTANTS.items():
+        for param in UPDATEABLE_PARAMETER_NAMES:
+            if param in constants.keys():
+                RR_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
+                    calibration_dataframe.loc[
+                        (calibration_dataframe.qubit_name == qubit_key) &
+                        (calibration_dataframe.calibration_parameter_name == param)
+                    ]['calibration_value'].values[0]
     print('RR_CONSTANTS pulled from calibration_data_dict.json')
 
 weights_dict = {}
@@ -644,3 +659,5 @@ config = {
         },
     },
 }
+
+qubit_resonator_correspondence = {qu: res for qu, res in zip(QUBIT_CONSTANTS.keys(), RR_CONSTANTS.keys())}
