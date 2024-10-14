@@ -34,6 +34,9 @@ UPDATEABLE_PARAMETER_NAMES = [
     'readout_duration',
     'readout_frequency',
     # 'use_opt_readout',
+    # 'readout_fidelity', 
+    'readout_angle', 
+    'readout_threshold'
 ]
 # Account for slight difference in naming convention. See update_calibration_configuration docstring for details
 SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
@@ -45,6 +48,8 @@ SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
     'readout_frequency': 'IF',
     'readout_fidelity': 'readout_fidelity',
     'use_opt_readout': 'use_opt_readout',
+    'readout_angle': 'rotation_angle',
+    'readout_threshold': 'ge_threshold',
 }
 
 class Node: 
@@ -79,7 +84,7 @@ class Node:
 
     def __init__(
         self,
-        calibration_parameter_name: str,
+        calibration_parameter_name: Union[str, List[str]],
         qubits_to_calibrate: List[str],
         refresh_time: float,
         expiration_time: float,
@@ -90,9 +95,8 @@ class Node:
         """
         Initialize a node instance by defining key parameters.
 
-        :param calibration_parameter_name: The name of the parameter pulled from and written to the database. 
-        TODO: PRIORITY accept a list of parameter names, so more than one parameter can be calibrated by a single 
-        measurement.
+        :param calibration_parameter_name: The name of the parameter pulled from and written to the database or a list
+        of such names.
         :param qubits_to_calibrate: List of qubit names that is iterated through for each calibration
         :param refresh time: The time (seconds) to wait after a successful calibration, before attempting recalibration
         :param expiration time: Unused. The time (seconds) after which a successful calibration is considered invalid.
@@ -102,13 +106,17 @@ class Node:
         used by the configuration.py and multiplex_configuration.py files. If False, the node runs as usual and saves 
         to the database, but the Quantum Machines configuration files will not be updated (useful for monitoring).
         """
-        self.calibration_parameter_name = calibration_parameter_name
+        if isinstance(calibration_parameter_name, str):
+            self.calibration_parameter_names = [calibration_parameter_name]
+        else:
+            self.calibration_parameter_names = calibration_parameter_name
         self.refresh_time = refresh_time
         self.expiration_time = expiration_time
         self.retry_time = retry_time
         self.fresh = fresh
         self.qubits_to_calibrate = qubits_to_calibrate
         self.calibration_value = np.nan
+        self.calibration_values = []
         self.experiment_data_location = ''
         self.miscellaneous = {}
         self.current_qubit = ''
@@ -117,6 +125,7 @@ class Node:
         self.loaded_database = Node.shared_dataframe
         self.exception_log = []
         self.update_calibration_config = update_calibration_config
+        self.initialize = False
 
 
     def calibrate(
@@ -127,7 +136,8 @@ class Node:
         Perform the calibration.
 
         Loops over qubits to calibrate. Pulls the latest database entry to determine if it is time to calibrate each
-        qubit. Makes at most MAX_ATTEMPTS number of attempts in a row to calibrate each qubit before giving up.
+        qubit. If more than one parameter is being calibrated, timing is based on the oldest entry among them.
+        Makes at most MAX_ATTEMPTS number of attempts in a row to calibrate each qubit before giving up.
         Can be used for the first run of a node, when there are no database entries for that calibration, by setting
         initialize = True.
         
@@ -135,14 +145,12 @@ class Node:
         because 1) the while loop terminates when it becomes True and 2) if there is an error in post-processing, it
         may make more sense to rerun the calibration or avoid saving a false positive. 
 
-        TODO: Move all calls of self.save_to_database and self.success_condition to this function to enforce the order
-        of method calls. Eg. save_to_database must preceed update_calibration_configuration
-
         :param initialize: Intended for starting a new calibration node. Set to True to ignore the database entries
         and just run a measurement and store its result in the database. Of course, this can be useful in other
-        scenarios as well. TODO: Initialize does not skip the success_condition. This is an easy fix by promoting 
-        initialize to an instance variable.
+        scenarios as well.
         """
+        self.initialize = initialize
+
         for qubit in self.qubits_to_calibrate:
             # Reset values for new qubit
             self.current_qubit = qubit
@@ -150,16 +158,24 @@ class Node:
             self.miscellaneous = {}
             self.calibration_success = False  # If last qubit succeeded, we need this reset
 
-            if not initialize:
+            if not self.initialize:
                 # Pull latest time of successful calibration
-                latest_successful_entry = self.loaded_database.loc[
-                    (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-                    (self.loaded_database.qubit_name == self.current_qubit) &
-                    (self.loaded_database.calibration_success == True)
-                ].iloc[-1]
-                latest_time = latest_successful_entry['timestamp']
-                refresh_time = timedelta(seconds=self.refresh_time)
-                now_time = datetime.now()
+                for i_c, calibration_parameter_name in enumerate(self.calibration_parameter_names):
+                    latest_successful_entry = self.loaded_database.loc[
+                        (self.loaded_database.calibration_parameter_name == calibration_parameter_name) &
+                        (self.loaded_database.qubit_name == self.current_qubit) &
+                        (self.loaded_database.calibration_success == True)
+                    ].iloc[-1]
+                    if i_c == 0 :
+                        latest_time = latest_successful_entry['timestamp']
+                    else:
+                        # Use oldest entry to determine refresh time of an entire group
+                        if latest_successful_entry['timestamp'] < latest_time:
+                            latest_time = latest_successful_entry['timestamp']
+
+                    refresh_time = timedelta(seconds=self.refresh_time)
+                    now_time = datetime.now()
+
             else:
                 # Specific values unimportant
                 latest_time = 100
@@ -170,7 +186,7 @@ class Node:
             
             # If it's time to refresh this qubit, then run the measurement
             # If initialize = True, ignore timing and run.
-            if (latest_time + refresh_time < now_time) or initialize:
+            if (latest_time + refresh_time < now_time) or self.initialize:
                 while i_attempt < MAX_ATTEMPTS and not self.calibration_success:
                     # If the last attempt (possibly by another qubit) overwrote these values
                     # we need to reset them
@@ -189,16 +205,16 @@ class Node:
                     # Save whatever we have to the database
                     print(f'Failed after {MAX_ATTEMPTS} attempts. Saving Exception log')
                     self.miscellaneous.update({'Exception Log': self.exception_log})
-                    self.save_to_database()
                 #TODO We should save the exception log regardless of success or failure
+        self.save_to_database()
         self.update_calibration_configuration()
         return
     
         
     def success_condition(
             self, 
-            calibration_value: float,
-            threshold: float,
+            calibration_value: Union[float, List[float]],
+            threshold: Union[float, List[float]],
             percent_change_bool: bool = True
     ):
         """
@@ -209,26 +225,40 @@ class Node:
         Regardless of the method used, the result must be stored in self.calibration_success to be used by the rest of
         the Node class structure.
 
+        When self.initialize = True, skip this check and assume success.
+
         :param calibration_value: value obtained from the latest measurement.
-        :param threshold: the value within which the new value must be relative to the old value.
+        :param threshold: the value(s) within which the new value must be relative to the old value.
         :param percent_change_bool: Set True to see if new value is within a certain percentage of the old value. False
         for new value within an absolute value of the old value.
         """
-        self.calibration_success = False
-        previous_calibration_value = self.loaded_database.loc[
-            (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
-            (self.loaded_database.qubit_name == self.current_qubit) &
-            (self.loaded_database.calibration_success == True)
-        ].iloc[-1]['calibration_value']
-
-        if percent_change_bool:
-            change = np.abs(calibration_value - previous_calibration_value)/previous_calibration_value
-        else:
-            change = np.abs(calibration_value - previous_calibration_value)
-
-
-        if change < threshold:
+        if self.initialize:
             self.calibration_success = True
+            print(f'calibration success: {self.calibration_success}')
+            return
+        
+        self.calibration_success = False
+        if isinstance(calibration_value, float):
+            calibration_value = [calibration_value]
+        if isinstance(threshold, float):
+            threshold = [threshold]
+        assert len(calibration_value) == len(threshold), 'Number and order of calibration_values must match thresholds'
+
+        for cv, thresh, calibration_parameter_name in zip(calibration_value, threshold, self.calibration_parameter_names):
+            previous_calibration_value = self.loaded_database.loc[
+                (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
+                (self.loaded_database.qubit_name == self.current_qubit) &
+                (self.loaded_database.calibration_success == True)
+            ].iloc[-1]['calibration_value']
+
+            if percent_change_bool:
+                change = np.abs(cv - previous_calibration_value)/previous_calibration_value
+            else:
+                change = np.abs(cv - previous_calibration_value)
+
+
+            if change < thresh:
+                self.calibration_success = True
         #TODO: upgrade from print statement to logging
         print(f'calibration success: {self.calibration_success}')
     
@@ -245,22 +275,34 @@ class Node:
     def save_to_database(self):
         """
         Save the latest results to the database file.
+        If more than one parameter was calibrated by the node, this method uses self.calibration_values.
+        Otherwise, it uses self.calibration_value
 
         dataframe columns: 
         timestamp, calibration_parameter_name, qubit_name, calibration_value, calibration_success, 
         experiment data location, miscellaneous
         """
+        if len(self.calibration_parameter_names) > 1:
+            calibration_values = self.calibration_values
+        else:
+            calibration_values = [self.calibration_value]
+
+        assert len(calibration_values) == len(self.calibration_parameter_names), (
+            'There must be as many calibration values as calibration_parameter_names. '
+            f'{len(calibration_values)=} != {len(self.calibration_parameter_names)=}'
+        )
         
-        new_row = [
-            datetime.now(), 
-            self.calibration_parameter_name, 
-            self.current_qubit, 
-            self.calibration_value,
-            self.calibration_success,
-            self.experiment_data_location,  # Path/To/Files/
-            self.miscellaneous,
-        ]
-        self.loaded_database.loc[len(self.loaded_database.index)] = new_row
+        for i_c, calibration_parameter_name in enumerate(self.calibration_parameter_names):
+            new_rows = [
+                datetime.now(), 
+                calibration_parameter_name, 
+                self.current_qubit, 
+                calibration_values[i_c],
+                self.calibration_success,
+                self.experiment_data_location,  # Path/To/Files/
+                self.miscellaneous,
+            ]
+        self.loaded_database.loc[len(self.loaded_database.index)] = new_rows
         self.loaded_database.to_pickle(DATAFRAME_FILE)
 
     
@@ -411,7 +453,6 @@ class Qubit_Amplitude_Node(Node):
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.calibration_value = fit_dict['fit_values']['center']*fit_dict['scaled_original_amplitude']
         self.success_condition(self.calibration_value, AMPLITUDE_CHANGE_THRESHOLD)
-        self.save_to_database()
         return fit_dict
 
 
@@ -466,7 +507,6 @@ class Qubit_Frequency_Node(Node):
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.calibration_value = QUBIT_CONSTANTS[self.current_qubit]["IF"] + fit_dict['qubit_detuning']
         self.success_condition(self.calibration_value, Q_FREQUENCY_CHANGE_THRESHOLD, False)
-        self.save_to_database()
         return fit_dict
 
 
@@ -510,7 +550,6 @@ class Resonator_Amplitude_Node(Node):
             threshold=AMPLITUDE_CHANGE_THRESHOLD, 
             percent_change_bool=False
         )
-        self.save_to_database()
 
 
 
@@ -550,7 +589,6 @@ class Resonator_Duration_Node(Node):
         self.experiment_data_location = data_folder
         self.calibration_value = opt_readout_length
         self.success_condition(self.calibration_value, READOUT_DURATION_CHANGE_THRESHOLD)
-        self.save_to_database()
 
 
 
@@ -571,7 +609,6 @@ class Readout_Frequency_Node(Node):
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.calibration_value = fit_dict['fit_values']['center'] + RR_CONSTANTS[qubit_resonator_correspondence[self.current_qubit]]['IF']
         self.success_condition(self.calibration_value, RR_FREQUENCY_CHANGE_THRESHOLD, False)
-        self.save_to_database()
         return fit_dict
     
 
@@ -597,7 +634,6 @@ class Readout_Weights_Node(Node):
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'weights_dict': weights_dict})
         self.success_condition()
-        self.save_to_database()
         return weights_dict
     
 
@@ -622,17 +658,21 @@ class IQ_Blobs_Node(Node):
         )
         
         if iq_blobs_dict['optimized']['fidelity'] > iq_blobs_dict['rotated']['fidelity']:
-            data_folder = iq_blobs_dict['optimized']['data_folder']
-            fidelity = iq_blobs_dict['optimized']['fidelity']
+            # data_folder = iq_blobs_dict['optimized']['data_folder']
+            # fidelity = iq_blobs_dict['optimized']['fidelity']
+            # angle = iq_blobs_dict['optimized']['angle']
+            # threshold = iq_blobs_dict['optimized']['threshold']
             use_opt_readout = True
         else:
-            data_folder = iq_blobs_dict['rotated']['data_folder']
-            fidelity = iq_blobs_dict['rotated']['fidelity']
             use_opt_readout = False
+
+        data_folder = iq_blobs_dict['rotated']['data_folder']   
+        fidelity = iq_blobs_dict['rotated']['fidelity']
+        angle = iq_blobs_dict['rotated']['angle']
+        threshold = iq_blobs_dict['rotated']['threshold']
 
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'iq_blobs_dict': iq_blobs_dict})
-        self.calibration_value = use_opt_readout
+        self.calibration_values = [use_opt_readout, fidelity, angle, threshold]
         self.success_condition(fidelity)
-        self.save_to_database()
 
