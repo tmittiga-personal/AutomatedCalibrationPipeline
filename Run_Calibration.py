@@ -1,3 +1,11 @@
+"""
+Define and run the calibration pipeline.
+First, call a Node child class instance and set its timings.
+Then, loop over each node's calibrate method. In this loop, you can define logic to determine relationships between 
+nodes. TODO: write parent-child logic into the Node class to determine which nodes require another node to run first.
+TODO: Use asyncio to permit running this script in the background and interleaving with User experiments.
+"""
+
 from calibration_nodes import *
 import time
 
@@ -84,6 +92,9 @@ iq_blobs_node = IQ_Blobs_Node(
 ### RUN ###
 ###########
 
+# Set the order of nodes
+# You can also implement any dependency logic here.
+
 if __name__ == "__main__":
 
     while True:
@@ -104,5 +115,5 @@ if __name__ == "__main__":
 
             iq_blobs_node.calibrate()
 
-            time.sleep(60)  # probe if calibration is needed every 60 seconds
+            time.sleep(60)  # probe if a calibration is needed every 60 seconds
         
