@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from IQ_blobs_comparison import IQ_blobs_comparison
 from qubit_power_error_amplification_class import Power_error_amplification
 from ramsey_w_virtual_rotation import Ramsey_w_virtual_rotation, DEFAULT_TAUS
-from readout_amplitude_optimization import readout_amplitude_optimization
+from readout_amplitude_binary_search import readout_amplitude_binary_search
 from readout_duration_optimization import readout_duration_optimization
 from readout_frequency_optimization import readout_frequency_optimization
 from readout_weights_optimization import readout_weights_optimization
@@ -18,11 +18,11 @@ from utils import *
 DATAFRAME_FILE = "./calibration_database.pkl"
 MAX_ATTEMPTS = 3
 AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
-Q_FREQUENCY_CHANGE_THRESHOLD = 1200  # 1.2 kHz tolerated
-RR_FREQUENCY_CHANGE_THRESHOLD = 10_000  # 10 kHz tolerated
+Q_FREQUENCY_CHANGE_THRESHOLD = 4000  # 1.2 kHz tolerated
+RR_FREQUENCY_CHANGE_THRESHOLD = 30_000  # 10 kHz tolerated
 READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
 READOUT_DURATION_CHANGE_THRESHOLD = 0.05  # 5% deviation tolerated
-IQ_THRESHOLD = 0.9  # 90% Readout fidelity tolerated
+IQ_THRESHOLD = 90  # 90% Readout fidelity tolerated
 
 # Controls which calibration parameters are actively updated.
 UPDATEABLE_PARAMETER_NAMES = [
@@ -32,7 +32,7 @@ UPDATEABLE_PARAMETER_NAMES = [
     # 'readout_amplitude',
     'readout_duration',
     'readout_frequency',
-    'use_opt_readout',
+    # 'use_opt_readout',
 ]
 # Account for slight difference in naming convention
 SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
@@ -160,6 +160,7 @@ class Node:
 
         if change < threshold:
             self.calibration_success = True
+        print(f'calibration success: {self.calibration_success}')
     
 
     def calibration_measurement(self):
@@ -283,7 +284,7 @@ class Qubit_Amplitude_Node(Node):
         )
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
-        self.calibration_value = fit_dict['fit_values']['center']*fit_dict['original_amplitude']
+        self.calibration_value = fit_dict['fit_values']['center']*fit_dict['scaled_original_amplitude']
         self.success_condition(self.calibration_value, AMPLITUDE_CHANGE_THRESHOLD)
         self.save_to_database()
         return fit_dict
@@ -367,13 +368,17 @@ class Resonator_Amplitude_Node(Node):
         because the while loop terminates when it becomes True.
         """
 
-        optimal_amplitude, data_folder = readout_amplitude_optimization(
+        optimal_amplitude, data_folder = readout_amplitude_binary_search(
             qubit = self.current_qubit,
             resonator = qubit_resonator_correspondence[self.current_qubit]
         )
         self.experiment_data_location = data_folder
         self.calibration_value = optimal_amplitude
-        self.success_condition(self.calibration_value, 1)
+        self.success_condition(
+            calibration_value=self.calibration_value, 
+            threshold=AMPLITUDE_CHANGE_THRESHOLD, 
+            percent_change_bool=False
+        )
         self.save_to_database()
 
 
@@ -420,8 +425,6 @@ class Resonator_Duration_Node(Node):
 
 
 class Readout_Frequency_Node(Node):
-    def success_condition(self):
-        self.calibration_success = True
 
     def calibration_measurement(self):
         """
@@ -436,7 +439,7 @@ class Readout_Frequency_Node(Node):
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.calibration_value = fit_dict['fit_values']['center'] + RR_CONSTANTS[qubit_resonator_correspondence[self.current_qubit]]['IF']
-        self.success_condition() #self.calibration_value, RR_FREQUENCY_CHANGE_THRESHOLD, False)
+        self.success_condition(self.calibration_value, RR_FREQUENCY_CHANGE_THRESHOLD, False)
         self.save_to_database()
         return fit_dict
     
@@ -447,6 +450,7 @@ class Readout_Weights_Node(Node):
 
     def success_condition(self):
         self.calibration_success = True
+        print(f'calibration success: {self.calibration_success}')
 
 
     def calibration_measurement(self):
@@ -472,6 +476,7 @@ class IQ_Blobs_Node(Node):
 
     def success_condition(self, fidelity: float):
         self.calibration_success = True if fidelity > IQ_THRESHOLD else False
+        print(f'calibration success: {self.calibration_success}')
         
 
     def calibration_measurement(self):

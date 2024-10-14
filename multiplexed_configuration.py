@@ -68,7 +68,8 @@ qubit_LO = 3.3 * u.GHz
 PI_LENGTH = 100
 PI_SIGMA = PI_LENGTH / 5
 
-qubit_octave_gain = 0
+qubit_octave_gain = 6
+amplitude_scaling = 0.5
 
 MULTIPLEX_DRIVE_CONSTANTS = {
     "drive1": {
@@ -156,7 +157,10 @@ if use_calibrated_values:
         for qubit_key, constants in QUBIT_CONSTANTS.items():
             for constants_key in constants.keys():
                 if constants_key in cal_dict['QUBIT_CONSTANTS'][qubit_key].keys():
-                    QUBIT_CONSTANTS[qubit_key][constants_key] = cal_dict['QUBIT_CONSTANTS'][qubit_key][constants_key]
+                    if constants_key in ["pi_amplitude", "pi_half_amplitude"]:
+                        QUBIT_CONSTANTS[qubit_key][constants_key] = cal_dict['QUBIT_CONSTANTS'][qubit_key][constants_key]*amplitude_scaling
+                    else:
+                        QUBIT_CONSTANTS[qubit_key][constants_key] = cal_dict['QUBIT_CONSTANTS'][qubit_key][constants_key]
     print('QUBIT_CONSTANTS pulled from calibration_data_dict.json')
 
 # Relaxation time
@@ -234,7 +238,7 @@ RL_CONSTANTS = {
 
 RR_CONSTANTS = {
     "q1_rr": {
-        "amplitude": 0.003,
+        "amplitude": 0.005,
         "readout_length": 8608,
         "midcircuit_amplitude": 0.2511, 
         "mc_readout_length": 3000,
@@ -258,7 +262,7 @@ RR_CONSTANTS = {
         "use_opt_readout": False,
     },
     "q3_rr": {
-        "amplitude": 0.003,
+        "amplitude": 0.005,
         "readout_length": 5120,
         "midcircuit_amplitude": 0.2238, 
         "mc_readout_length": 3000,
@@ -282,7 +286,7 @@ RR_CONSTANTS = {
         "use_opt_readout": False,
     },
     "q5_rr": {
-        "amplitude": 0.004, 
+        "amplitude": 0.0055, 
         "readout_length": 3000,
         "midcircuit_amplitude": 0.3548, 
         "mc_readout_length": 3000,

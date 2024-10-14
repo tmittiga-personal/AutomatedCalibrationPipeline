@@ -181,3 +181,9 @@ def IQ_blobs_comparison(
             plt.close()
 
     return results_dict
+
+if __name__ == "__main__":
+    IQ_blobs_comparison(
+        'q5_xy',
+        'q5_rr',
+    )

@@ -88,17 +88,19 @@ if __name__ == "__main__":
 
     while True:
         while is_valid_time():
+            qubit_frequency_node.calibrate()
+
             pi_amplitude_node.calibrate()
 
             pi_half_amplitude_node.calibrate()
 
-            qubit_frequency_node.calibrate()
-
             resonator_frequency_node.calibrate()
+
+            resonator_amplitude_node.calibrate()
 
             resonator_duration_node.calibrate()
 
-            resonator_weights_node.calibrate()
+            # resonator_weights_node.calibrate()
 
             iq_blobs_node.calibrate()
 

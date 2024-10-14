@@ -41,6 +41,7 @@ class Power_error_amplification:
         self.resonator = qubit_resonator_correspondence[self.qubit]
         self.parameter_name = parameter_name
         self.amplitude = QUBIT_CONSTANTS[qubit][parameter_name+'amplitude']
+        self.amplitude_scaling = amplitude_scaling
         self.amplitude_sweep = np.array([])
         self.x_label = 'Pulse Amplitude [V]'
         self.y_label = 'Population'
@@ -82,6 +83,7 @@ class Power_error_amplification:
             "qubit_LO": MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
             "qubit_IF": QUBIT_CONSTANTS[self.qubit]["IF"],
             self.parameter_name+"_amp": self.amplitude,
+            "amplitude_scaling": amplitude_scaling,
             self.parameter_name+"_len": QUBIT_CONSTANTS[self.qubit][self.parameter_name+"len"],
             "amplitudes": self.amplitude_sweep,
             "qubit_octave_gain": qubit_octave_gain,
@@ -246,6 +248,7 @@ class Power_error_amplification:
         fit_dict = {
             'fit_data_name': 'I' if self.is_negative_amplitude else 'Q',
             'original_amplitude': self.amplitude,
+            'scaled_original_amplitude': self.amplitude/self.amplitude_scaling,
             'amplitudes': self.amplitude_sweep,
             'fit_data': self.lineout,
             'fit_values': {

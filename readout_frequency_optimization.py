@@ -273,6 +273,7 @@ def readout_frequency_optimization(
                 'background': std_vec[3],
             },
         }
+        ro_freq_opt_data["base_frequency"] = RR_CONSTANTS[resonator]['IF']
         ro_freq_opt_data["Ig_avg"] = Ig_avg
         ro_freq_opt_data["Qg_avg"] = Qg_avg
         ro_freq_opt_data["Ie_avg"] = Ie_avg

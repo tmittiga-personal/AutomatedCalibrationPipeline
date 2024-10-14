@@ -238,7 +238,7 @@ def readout_weights_optimization(
         weights_imag = norm_subtracted_trace.imag
         weights_minus_real = -norm_subtracted_trace.real
         # Save the weights for later use in the config
-        qubit_number = qubit(qubit.find('q')+1)
+        qubit_number = qubit[qubit.find('q')+1]
         np.savez(
             f"optimal_weights_qubit{qubit_number}",
             weights_real=weights_real,
