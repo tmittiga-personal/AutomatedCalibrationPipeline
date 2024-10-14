@@ -4,6 +4,7 @@ from typing import *
 from pandas._typing import DataFrame
 import json
 from datetime import datetime, timedelta
+import traceback
 
 from IQ_blobs_comparison import IQ_blobs_comparison
 from qubit_power_error_amplification_class import Power_error_amplification
@@ -196,16 +197,16 @@ class Node:
                     try:
                         self.calibration_measurement()
                     except Exception as e:
-                        #TODO: Store entire traceback, not just the exception message
-                        print(f'Failed Attempt. Try again. Exception: {e}')
-                        self.exception_log.append(e)
+                        tb = traceback.format_exc()
+                        print(f'Failed Attempt. Try again. Exception: {tb}')
+                        self.exception_log.append(tb)
                     i_attempt +=1
 
                 if i_attempt >= MAX_ATTEMPTS:
                     # Save whatever we have to the database
-                    print(f'Failed after {MAX_ATTEMPTS} attempts. Saving Exception log')
-                    self.miscellaneous.update({'Exception Log': self.exception_log})
-                #TODO We should save the exception log regardless of success or failure
+                    print(f'Failed after {MAX_ATTEMPTS} attempts.')
+                    self.exception_log.append(f'Failed after {MAX_ATTEMPTS} attempts.')
+                self.miscellaneous['Exception Log'] = self.exception_log
         self.save_to_database()
         self.update_calibration_configuration()
         return
@@ -437,7 +438,6 @@ class Qubit_Amplitude_Node(Node):
         """
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
         because the while loop terminates when it becomes True.
-        TODO: promote all success_condition and save_to_database calls to parent class
         """
 
         pea = Power_error_amplification(
