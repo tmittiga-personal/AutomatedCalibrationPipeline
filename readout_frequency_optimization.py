@@ -126,13 +126,22 @@ def readout_frequency_optimization(
                 # Update the frequency of the digital oscillator linked to the resonator element
                 update_frequency(resonator, df + RR_CONSTANTS[resonator]['IF'])
                 # Measure the state of the resonator
-                measure(
-                    "readout",
-                    resonator,
-                    None,
-                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_g),
-                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_g),
-                )
+                if RR_CONSTANTS[resonator]["use_opt_readout"]:
+                    measure(
+                        "readout",
+                        resonator,
+                        None,
+                        dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_g),
+                        dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_g),
+                    )
+                else:
+                    measure(
+                        "readout",
+                        resonator,
+                        None,
+                        dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_g),
+                        dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_g),
+                    )
                 # Wait for the qubit to decay to the ground state
                 wait(thermalization_time * u.ns, resonator)
                 # Save the 'I_e' & 'Q_e' quadratures to their respective streams
@@ -264,6 +273,7 @@ def readout_frequency_optimization(
                 'background': std_vec[3],
             },
         }
+        ro_freq_opt_data["base_frequency"] = RR_CONSTANTS[resonator]['IF']
         ro_freq_opt_data["Ig_avg"] = Ig_avg
         ro_freq_opt_data["Qg_avg"] = Qg_avg
         ro_freq_opt_data["Ie_avg"] = Ie_avg

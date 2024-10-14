@@ -5,7 +5,9 @@ from qualang_tools.config.waveform_tools import drag_gaussian_pulse_waveforms
 from qualang_tools.units import unit
 from set_octave import OctaveUnit, octave_declaration
 
-use_calibrated_values = True
+# True to overwrite values with automated calbiration values
+# False to use values as written in this file
+use_calibrated_values = True  
 
 #######################
 # AUXILIARY FUNCTIONS #
@@ -15,7 +17,7 @@ u = unit(coerce_to_integer=True)
 ######################
 # Network parameters #
 ######################
-qop_ip = "192.168.88.253"  # Write the QM router IP address
+qop_ip = "192.168.88.250"  # Write the QM router IP address
 octave_ip = "192.168.88.251"
 
 cluster_name = "Cluster_1"  # Write your cluster_name if version >= QOP220
@@ -66,7 +68,8 @@ qubit_LO = 3.3 * u.GHz
 PI_LENGTH = 100
 PI_SIGMA = PI_LENGTH / 5
 
-qubit_octave_gain = 0
+qubit_octave_gain = 6
+amplitude_scaling = 0.5
 
 MULTIPLEX_DRIVE_CONSTANTS = {
     "drive1": {
@@ -151,7 +154,13 @@ QUBIT_CONSTANTS = {
 if use_calibrated_values:
     with open('calibration_data_dict.json', 'r') as json_file:
         cal_dict = json.load(json_file)
-        QUBIT_CONSTANTS = cal_dict['QUBIT_CONSTANTS']
+        for qubit_key, constants in QUBIT_CONSTANTS.items():
+            for constants_key in constants.keys():
+                if constants_key in cal_dict['QUBIT_CONSTANTS'][qubit_key].keys():
+                    if constants_key in ["pi_amplitude", "pi_half_amplitude"]:
+                        QUBIT_CONSTANTS[qubit_key][constants_key] = cal_dict['QUBIT_CONSTANTS'][qubit_key][constants_key]*amplitude_scaling
+                    else:
+                        QUBIT_CONSTANTS[qubit_key][constants_key] = cal_dict['QUBIT_CONSTANTS'][qubit_key][constants_key]
     print('QUBIT_CONSTANTS pulled from calibration_data_dict.json')
 
 # Relaxation time
@@ -229,7 +238,7 @@ RL_CONSTANTS = {
 
 RR_CONSTANTS = {
     "q1_rr": {
-        "amplitude": 0.004,
+        "amplitude": 0.005,
         "readout_length": 8608,
         "midcircuit_amplitude": 0.2511, 
         "mc_readout_length": 3000,
@@ -262,7 +271,7 @@ RR_CONSTANTS = {
         "ge_threshold": 1.1815551,
         "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
         "midcircuit_ge_threshold": 0.0,
-        "use_opt_readout": True,
+        "use_opt_readout": False,
     },
     "q4_rr": {
         "amplitude": 0.002, 
@@ -277,7 +286,7 @@ RR_CONSTANTS = {
         "use_opt_readout": False,
     },
     "q5_rr": {
-        "amplitude": 0.008, 
+        "amplitude": 0.0055, 
         "readout_length": 3000,
         "midcircuit_amplitude": 0.3548, 
         "mc_readout_length": 3000,
@@ -304,7 +313,10 @@ RR_CONSTANTS = {
 if use_calibrated_values:
     with open('calibration_data_dict.json', 'r') as json_file:
         cal_dict = json.load(json_file)
-        RR_CONSTANTS = cal_dict['RR_CONSTANTS']
+        for rr_key, constants in RR_CONSTANTS.items():
+            for constants_key in constants.keys():
+                if constants_key in cal_dict['RR_CONSTANTS'][rr_key].keys():
+                    RR_CONSTANTS[rr_key][constants_key] = cal_dict['RR_CONSTANTS'][rr_key][constants_key]
     print('RR_CONSTANTS pulled from calibration_data_dict.json')
 
 weights_dict = {}

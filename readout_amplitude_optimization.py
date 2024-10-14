@@ -193,3 +193,9 @@ def readout_amplitude_optimization(
         plt.close()
 
         return ro_amp_optimization["averaged_optimal_amplitude"], data_folder
+    
+if __name__ == "__main__":
+    readout_amplitude_optimization(
+        'q1_xy',
+        'q1_rr',
+    )

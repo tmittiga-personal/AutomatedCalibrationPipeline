@@ -76,10 +76,10 @@ with program() as IQ_blobs:
             "readout",
             "resonator",
             None,
-            dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_g),
-            dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_g),
-            # dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_g),
-            # dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_g),
+            # dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_g),
+            # dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_g),
+            dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_g),
+            dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_g),
         )
         # Wait for the qubit to decay to the ground state in the case of measurement induced transitions
         wait(thermalization_time * u.ns, "resonator")
@@ -110,10 +110,10 @@ with program() as IQ_blobs:
             "readout",
             "resonator",
             None,
-            dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_e),
-            dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_e),
-            # dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_e),
-            # dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_e),
+            # dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_e),
+            # dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_e),
+            dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_e),
+            dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_e),
         )
 
         '''play('x180', 'qubit', condition=I_e>-5.530e-04)
