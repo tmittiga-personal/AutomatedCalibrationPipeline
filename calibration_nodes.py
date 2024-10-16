@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 from typing import *
-from pandas._typing import DataFrame
 import json
 from datetime import datetime, timedelta
 
@@ -75,7 +74,7 @@ class Node:
     """
     # Class variable shared by all instances, loaded from a file.
     # This way, we only have to load the dataframe once
-    shared_dataframe: DataFrame = pd.read_pickle(DATAFRAME_FILE)
+    shared_dataframe: pd.DataFrame = pd.read_pickle(DATAFRAME_FILE)
 
     def __init__(
         self,
@@ -269,7 +268,7 @@ class Node:
         qubit: str,
         search_parameter_names: List[str],
         n_latest: int = 1
-    ) -> DataFrame:
+    ) -> pd.DataFrame:
         """
         Assuming the database is loaded as a DataFrame, pull the n_latest calibration parameter database entries.
         This method is written more generally, so it can be used outside of the calibration pipeline run, if desired.
