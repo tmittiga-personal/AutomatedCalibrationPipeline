@@ -41,16 +41,10 @@ def pull_latest_calibrated_values(
     DATAFRAME_FILE = "./calibration_database.pkl"
     df = pd.read_pickle(DATAFRAME_FILE)
 
-    for i_df, param_name in enumerate(search_parameter_names):
-        
-        dfq = df.loc[
-            (df.calibration_parameter_name == param_name) &
-            (df.qubit_name in qubits) &
+    df_found = df.loc[
+            (df['calibration_parameter_name'].isin(search_parameter_names)) &
+            (df['qubit_name'].isin(qubits)) &
             (df.calibration_success == True)
-        ].iloc[-1*n_latest:]
-        
-        if i_df == 0:
-            df_found = pd.DataFrame(dfq)
-        else:
-            df_found = pd.concat([df_found, dfq], ignore_index=True)
+        ].drop_duplicates(subset = ['qubit_name', 'calibration_parameter_name'], keep='last')
+    
     return df_found

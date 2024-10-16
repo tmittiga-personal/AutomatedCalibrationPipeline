@@ -162,13 +162,13 @@ QUBIT_CONSTANTS = {
 if use_calibrated_values:
     for qubit_key, constants in QUBIT_CONSTANTS.items():
         for param in UPDATEABLE_PARAMETER_NAMES:
-            if param in ["pi_amplitude", "pi_half_amplitude"]:
+            if SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in ["pi_amplitude", "pi_half_amplitude"]:
                 QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
                     calibration_dataframe.loc[
                         (calibration_dataframe.qubit_name == qubit_key) &
                         (calibration_dataframe.calibration_parameter_name == param)
                     ]['calibration_value'].values[0]*amplitude_scaling
-            elif param in constants.keys():
+            elif SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in constants.keys():
                 QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
                     calibration_dataframe.loc[
                         (calibration_dataframe.qubit_name == qubit_key) &
@@ -323,15 +323,22 @@ RR_CONSTANTS = {
         "use_opt_readout": False,
     },
 }
+
+qubit_resonator_correspondence = {qu: res for qu, res in zip(QUBIT_CONSTANTS.keys(), RR_CONSTANTS.keys())}
+
 if use_calibrated_values:
-    for qubit_key, constants in RR_CONSTANTS.items():
+    for qubit_key, constants in zip(QUBIT_CONSTANTS.keys(), RR_CONSTANTS.values()):
         for param in UPDATEABLE_PARAMETER_NAMES:
-            if param in constants.keys():
-                RR_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
-                    calibration_dataframe.loc[
-                        (calibration_dataframe.qubit_name == qubit_key) &
-                        (calibration_dataframe.calibration_parameter_name == param)
-                    ]['calibration_value'].values[0]
+            if SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in constants.keys():
+                print(f'{qubit_key=}, {param=}, {SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]=}')
+                try:
+                    RR_CONSTANTS[qubit_resonator_correspondence[qubit_key]][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
+                        calibration_dataframe.loc[
+                            (calibration_dataframe.qubit_name == qubit_key) &
+                            (calibration_dataframe.calibration_parameter_name == param)
+                        ]['calibration_value'].values[0]
+                except Exception as e:
+                    print(e)
     print('RR_CONSTANTS pulled from calibration_data_dict.json')
 
 weights_dict = {}
@@ -659,5 +666,3 @@ config = {
         },
     },
 }
-
-qubit_resonator_correspondence = {qu: res for qu, res in zip(QUBIT_CONSTANTS.keys(), RR_CONSTANTS.keys())}
