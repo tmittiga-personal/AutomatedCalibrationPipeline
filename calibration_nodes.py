@@ -13,6 +13,7 @@ from readout_duration_optimization import readout_duration_optimization
 from readout_frequency_optimization import readout_frequency_optimization
 from readout_weights_optimization import readout_weights_optimization
 
+import importlib
 import multiplexed_configuration
 from multiplexed_configuration import *
 from utils import *
