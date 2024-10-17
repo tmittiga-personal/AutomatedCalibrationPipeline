@@ -81,7 +81,7 @@ resonator_weights_node = Readout_Weights_Node(
 )
 
 iq_blobs_node = IQ_Blobs_Node(
-    calibration_parameter_name = 'use_opt_readout',
+    calibration_parameter_name = ['use_opt_readout', 'readout_fidelity', 'readout_angle', 'readout_threshold'],
     qubits_to_calibrate = CALIBRATION_QUBITS,
     refresh_time = 3600*3,
     expiration_time = 3600*24,
@@ -99,6 +99,7 @@ if __name__ == "__main__":
 
     while True:
         while is_valid_time():
+            
             qubit_frequency_node.calibrate()
 
             pi_amplitude_node.calibrate()
