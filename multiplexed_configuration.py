@@ -1,12 +1,12 @@
 from pathlib import Path
 import numpy as np
-import json
 from qualang_tools.config.waveform_tools import drag_gaussian_pulse_waveforms
 from qualang_tools.units import unit
 from set_octave import OctaveUnit, octave_declaration
 from utils import *
 
 ALL_QUBIT_NAMES = ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy"]
+CALIBRATION_QUBITS = ["q1_xy","q3_xy","q5_xy"]
 # True to overwrite values with automated calbiration values
 # False to use values as written in this file
 use_calibrated_values = True  
@@ -160,7 +160,7 @@ QUBIT_CONSTANTS = {
     },
 }
 if use_calibrated_values:
-    for qubit_key, constants in QUBIT_CONSTANTS.items():
+    for qubit_key, constants in zip(CALIBRATION_QUBITS, QUBIT_CONSTANTS.values()):
         for param in UPDATEABLE_PARAMETER_NAMES:
             if SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in ["pi_amplitude", "pi_half_amplitude"]:
                 QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
@@ -168,6 +168,13 @@ if use_calibrated_values:
                         (calibration_dataframe.qubit_name == qubit_key) &
                         (calibration_dataframe.calibration_parameter_name == param)
                     ]['calibration_value'].values[0]*amplitude_scaling
+            elif SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] == 'IF':
+                # Due to overlap in names for qubit and resonator, we need to be specific
+                QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
+                    calibration_dataframe.loc[
+                        (calibration_dataframe.qubit_name == qubit_key) &
+                        (calibration_dataframe.calibration_parameter_name == 'IF')
+                    ]['calibration_value'].values[0]
             elif SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in constants.keys():
                 QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
                     calibration_dataframe.loc[
@@ -327,10 +334,16 @@ RR_CONSTANTS = {
 qubit_resonator_correspondence = {qu: res for qu, res in zip(QUBIT_CONSTANTS.keys(), RR_CONSTANTS.keys())}
 
 if use_calibrated_values:
-    for qubit_key, constants in zip(QUBIT_CONSTANTS.keys(), RR_CONSTANTS.values()):
+    for qubit_key, constants in zip(CALIBRATION_QUBITS, RR_CONSTANTS.values()):
         for param in UPDATEABLE_PARAMETER_NAMES:
-            if SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in constants.keys():
-                print(f'{qubit_key=}, {param=}, {SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]=}')
+            if SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] == 'IF':
+                # Due to overlap in names for qubit and resonator, we need to be specific
+                RR_CONSTANTS[qubit_resonator_correspondence[qubit_key]][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
+                    calibration_dataframe.loc[
+                        (calibration_dataframe.qubit_name == qubit_key) &
+                        (calibration_dataframe.calibration_parameter_name == 'readout_frequency')
+                    ]['calibration_value'].values[0]
+            elif SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in constants.keys():
                 try:
                     RR_CONSTANTS[qubit_resonator_correspondence[qubit_key]][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
                         calibration_dataframe.loc[

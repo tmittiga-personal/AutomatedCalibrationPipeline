@@ -39,7 +39,7 @@ def IQ_blobs_comparison(
     IQ_blobs_data = {
         "n_runs": n_runs,
         "resonator_LO": RL_CONSTANTS["rl1"]["LO"],
-        "readout_amp": RR_CONSTANTS[qubit_resonator_correspondence[qubit]]["amplitude"],
+        "readout_amp": RR_CONSTANTS[resonator]["amplitude"],
         "qubit_LO": MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
         "qubit_IF": QUBIT_CONSTANTS[qubit]["IF"],
     }
@@ -174,7 +174,7 @@ def IQ_blobs_comparison(
             data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_IQ_blobs_{readout_type}")
             results_dict[readout_type] = {
                 "fidelity": fidelity,
-                "angle": angle,
+                "angle": angle + RR_CONSTANTS[resonator]["rotation_angle"],  # Update angle
                 "threshold": threshold,
                 'data_folder': data_folder,
             }
@@ -184,6 +184,6 @@ def IQ_blobs_comparison(
 
 if __name__ == "__main__":
     IQ_blobs_comparison(
-        'q5_xy',
-        'q5_rr',
+        'q1_xy',
+        'q1_rr',
     )

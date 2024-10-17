@@ -13,6 +13,7 @@ from readout_duration_optimization import readout_duration_optimization
 from readout_frequency_optimization import readout_frequency_optimization
 from readout_weights_optimization import readout_weights_optimization
 
+import multiplexed_configuration
 from multiplexed_configuration import *
 from utils import *
 
@@ -169,6 +170,7 @@ class Node:
 
                     try:
                         self.calibration_measurement()
+                        self.save_to_database()
                     except Exception as e:
                         tb = traceback.format_exc()
                         print(f'Failed Attempt. Try again. Exception: {tb}')
@@ -179,9 +181,9 @@ class Node:
                     # Save whatever we have to the database
                     print(f'Failed after {MAX_ATTEMPTS} attempts.')
                     self.exception_log.append(f'Failed after {MAX_ATTEMPTS} attempts.')
-                self.miscellaneous['Exception Log'] = self.exception_log
-        self.save_to_database()
-        self.update_calibration_configuration()
+                    self.miscellaneous['Exception Log'] = self.exception_log
+                    self.save_to_database()
+        # self.update_calibration_configuration()
         return
     
         
@@ -212,15 +214,15 @@ class Node:
             return
         
         self.calibration_success = False
-        if isinstance(calibration_value, float):
+        if not isinstance(calibration_value, list):
             calibration_value = [calibration_value]
-        if isinstance(threshold, float):
+        if not isinstance(threshold, list):
             threshold = [threshold]
         assert len(calibration_value) == len(threshold), 'Number and order of calibration_values must match thresholds'
 
         for cv, thresh, calibration_parameter_name in zip(calibration_value, threshold, self.calibration_parameter_names):
             previous_calibration_value = self.loaded_database.loc[
-                (self.loaded_database.calibration_parameter_name == self.calibration_parameter_name) &
+                (self.loaded_database.calibration_parameter_name == calibration_parameter_name) &
                 (self.loaded_database.qubit_name == self.current_qubit) &
                 (self.loaded_database.calibration_success == True)
             ].iloc[-1]['calibration_value']
@@ -265,9 +267,9 @@ class Node:
             'There must be as many calibration values as calibration_parameter_names. '
             f'{len(calibration_values)=} != {len(self.calibration_parameter_names)=}'
         )
-        
+
         for i_c, calibration_parameter_name in enumerate(self.calibration_parameter_names):
-            new_rows = [
+            new_row = [
                 datetime.now(), 
                 calibration_parameter_name, 
                 self.current_qubit, 
@@ -276,8 +278,9 @@ class Node:
                 self.experiment_data_location,  # Path/To/Files/
                 self.miscellaneous,
             ]
-        self.loaded_database.loc[len(self.loaded_database.index)] = new_rows
+            self.loaded_database.loc[len(self.loaded_database.index)] = new_row
         self.loaded_database.to_pickle(DATAFRAME_FILE)
+        self.reimport_multiplex_configuration()  # Until we update the config directly
 
     
     def pull_latest_calibrated_values(
@@ -311,6 +314,18 @@ class Node:
             else:
                 df_found = pd.concat([df_found, dfq], ignore_index=True)
         return df_found
+    
+
+    def reimport_multiplex_configuration(self):
+        """
+        This function forces the re-importing of the multiplex_configuration.py file.
+        This is unfortunately necessary for running multiple experiments in the same script, each of whose output updates
+        the configuration. Basically, it's necessary with the calibration pipeline, until I write another function that
+        overwrites the configuration without re-importing.
+        """
+        importlib.reload(multiplexed_configuration)
+        globals().update({k: getattr(multiplexed_configuration, k) 
+                          for k in dir(multiplexed_configuration) if not k.startswith('_')})
 
 
     def update_calibration_configuration(self):

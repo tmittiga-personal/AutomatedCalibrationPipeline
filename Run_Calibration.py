@@ -99,6 +99,7 @@ if __name__ == "__main__":
 
     while True:
         while is_valid_time():
+            
             qubit_frequency_node.calibrate()
 
             pi_amplitude_node.calibrate()
