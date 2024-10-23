@@ -181,7 +181,7 @@ if use_calibrated_values:
                         (calibration_dataframe.qubit_name == qubit_key) &
                         (calibration_dataframe.calibration_parameter_name == param)
                     ]['calibration_value'].values[0]
-    print('QUBIT_CONSTANTS pulled from calibration_data_dict.json')
+    print('QUBIT_CONSTANTS pulled from calibration_database.pkl')
 
 # Relaxation time
 qubit_T1 = int(200 * u.us)
@@ -352,7 +352,7 @@ if use_calibrated_values:
                         ]['calibration_value'].values[0]
                 except Exception as e:
                     print(e)
-    print('RR_CONSTANTS pulled from calibration_data_dict.json')
+    print('RR_CONSTANTS pulled from calibration_database.pkl')
 
 weights_dict = {}
 for i_q, key in enumerate(RR_CONSTANTS.keys()):

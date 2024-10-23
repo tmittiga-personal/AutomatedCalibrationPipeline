@@ -1,5 +1,6 @@
 import pandas as pd
 from typing import *
+import numpy as np
 
 # Controls which calibration parameters are actively updated.
 UPDATEABLE_PARAMETER_NAMES = [
@@ -48,3 +49,25 @@ def pull_latest_calibrated_values(
         ].drop_duplicates(subset = ['qubit_name', 'calibration_parameter_name'], keep='last')
     
     return df_found
+
+def thresholding(data_array, threshold):
+    return np.array(data_array) > threshold
+
+def wilson_score_interval(avg_thresholded_data, n, z=1.96):
+
+    intervals = np.zeros((2,len(avg_thresholded_data)))
+    for i_p, p in enumerate(avg_thresholded_data):
+        intervals[0][i_p] = np.max([0, 
+                                    ( 2*n*p + z**2 - (z * np.sqrt( z**2 - 1/n + 4*n*p*(1-p) + (4*p-2) ) + 1 ) ) / (2 *(n+z**2))
+                                    ])
+        intervals[1][i_p] = np.min([1,
+                                    ( 2*n*p + z**2 + (z * np.sqrt( z**2 - 1/n + 4*n*p*(1-p) - (4*p-2) ) + 1 ) ) / (2 *(n+z**2))
+                                    ])
+    return intervals
+
+def errorbars_from_intervals(avg_thresholded_data, intervals):
+    """Assumes intervals contain lower and upper CIs, shaped (2,data_length)"""
+    errorbars = np.zeros((2,len(avg_thresholded_data)))
+    for i in range(2):
+        errorbars[i] = np.abs(np.array(avg_thresholded_data) - np.array(intervals[i]))
+    return errorbars

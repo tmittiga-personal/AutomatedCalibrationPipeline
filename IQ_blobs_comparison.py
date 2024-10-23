@@ -174,7 +174,7 @@ def IQ_blobs_comparison(
             data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_IQ_blobs_{readout_type}")
             results_dict[readout_type] = {
                 "fidelity": fidelity,
-                "angle": angle + RR_CONSTANTS[resonator]["rotation_angle"],  # Update angle
+                "angle": np.mod(angle + RR_CONSTANTS[resonator]["rotation_angle"], 2*np.pi),  # Update angle
                 "threshold": threshold,
                 'data_folder': data_folder,
             }

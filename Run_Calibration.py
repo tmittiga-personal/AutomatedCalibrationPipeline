@@ -51,7 +51,7 @@ qubit_frequency_node = Qubit_Frequency_Node(
 resonator_frequency_node = Readout_Frequency_Node(    
     calibration_parameter_name = 'readout_frequency',
     qubits_to_calibrate = CALIBRATION_QUBITS,
-    refresh_time = 3600*3,
+    refresh_time = 60, #3600*3,
     expiration_time = 3600*24,
     retry_time = 60*5,
 )
@@ -59,7 +59,7 @@ resonator_frequency_node = Readout_Frequency_Node(
 resonator_amplitude_node = Resonator_Amplitude_Node(    
     calibration_parameter_name = 'readout_amplitude',
     qubits_to_calibrate = CALIBRATION_QUBITS,
-    refresh_time = 3600*3,
+    refresh_time = 60, #3600*3,
     expiration_time = 3600*24,
     retry_time = 60*5,
 )
@@ -67,7 +67,7 @@ resonator_amplitude_node = Resonator_Amplitude_Node(
 resonator_duration_node = Resonator_Duration_Node(    
     calibration_parameter_name = 'readout_duration',
     qubits_to_calibrate = CALIBRATION_QUBITS,
-    refresh_time = 3600*3,
+    refresh_time = 60, #3600*3,
     expiration_time = 3600*24,
     retry_time = 60*5,
 )
@@ -108,13 +108,13 @@ if __name__ == "__main__":
 
             resonator_frequency_node.calibrate()
 
-            resonator_amplitude_node.calibrate()
-
             resonator_duration_node.calibrate()
+
+            resonator_amplitude_node.calibrate()
 
             # resonator_weights_node.calibrate()
 
             iq_blobs_node.calibrate()
 
-            time.sleep(60)  # probe if a calibration is needed every 60 seconds
+            time.sleep(5*60)  # probe if a calibration is needed every 60 seconds
         

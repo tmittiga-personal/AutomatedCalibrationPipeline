@@ -227,7 +227,7 @@ def readout_amplitude_binary_search(
         
 
         iteration += 1
-    data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_IQ_blobs_{READOUT_TYPE}")
+    data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_resonator_amplitude_binary_search")
     results_dict['data_folder'] = data_folder
     return best_amplitude, data_folder
 

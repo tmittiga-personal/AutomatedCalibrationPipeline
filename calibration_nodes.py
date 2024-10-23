@@ -20,11 +20,11 @@ from utils import *
 
 DATAFRAME_FILE = "./calibration_database.pkl"
 MAX_ATTEMPTS = 3
-AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
-Q_FREQUENCY_CHANGE_THRESHOLD = 4000  # 1.2 kHz tolerated
-RR_FREQUENCY_CHANGE_THRESHOLD = 30_000  # 10 kHz tolerated
-READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.10  # 10% deviation tolerated
-READOUT_DURATION_CHANGE_THRESHOLD = 0.05  # 5% deviation tolerated
+AMPLITUDE_CHANGE_THRESHOLD = 0.50  # 10% deviation tolerated
+Q_FREQUENCY_CHANGE_THRESHOLD = 10_000  # 1.2 kHz tolerated
+RR_FREQUENCY_CHANGE_THRESHOLD = 200_000  # 10 kHz tolerated
+READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.50  # 10% deviation tolerated
+READOUT_DURATION_CHANGE_THRESHOLD = 0.25  # 5% deviation tolerated
 IQ_THRESHOLD = 90  # 90% Readout fidelity tolerated
 
 
