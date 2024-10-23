@@ -1,15 +1,14 @@
 """
-        T1 MEASUREMENT
-The sequence consists in putting the qubit in the excited stated by playing the x180 pulse and measuring the resonator
-after a varying time. The qubit T1 is extracted by fitting the exponential decay of the measured quadratures.
+        A rough example of splitting a program up into smaller chunks that are pre-compiled, then sent to the Quantum Machines multiple times
+        In this example of multiplex Ramsey, each run of the experiment is saved in separate data files. It should be fairly trivial to
+        extend to the case of averaging all runs of the experiment together and saving in one file though.
 
-Prerequisites:
-    - Having found the resonance frequency of the resonator coupled to the qubit under study (resonator_spectroscopy).
-    - Having calibrated qubit pi pulse (x180) by running qubit, spectroscopy, rabi_chevron, power_rabi and updated the config.
-    - (optional) Having calibrated the readout (readout_frequency, amplitude, duration_optimization IQ_blobs) for better SNR.
+        As written, if this program was not split up into chunks that compiled separately, it would exceed the compilation timeout.
+        Splitting it into at least 2 chunks using self.program_divisions = 2 beats the compilation timeout.
 
-Next steps before going to the next node:
-    - Update the qubit T1 (qubit_T1) in the configuration.
+        This example also includes some other compilation optimizations: precompiling all pulses into the config, and minimizing the number of data streams to 1
+
+        In multiplex ramsey, all probe_qubits are driven simultaneously.
 """
 
 from qm.qua import *
@@ -32,46 +31,30 @@ class multiplex_ramsey:
     def __init__(
         self,
     ):
+        ############################
+        ### USER INPUTE REQUIRED ###
+        ############################
+        # Initialize all shared variables.
         self.probe_qubits = ["q1_xy", "q3_xy", "q5_xy"] #, "q3_xy", "q4_xy", "q5_xy", "q6_xy"]
         self.f_artificial = 0.1 * u.MHz
         self.n_avg = 1000  # The number of averages
-        self.program_divisions = 2
+        self.program_divisions = 3  # Number of chunks to split the prgram into for beating compilation times
         # Pulse duration sweep (in clock cycles = 4ns) - must be larger than 4 clock cycles
-        # taus = np.arange(tau_min, tau_max + 0.1, d_tau)  # + 0.1 to add tau_max to taus
         self.taus = np.concatenate(
             (np.arange(4, 21240//4 , 1240//2), # 0.1 MHz
             np.arange(4, 21240//4 , 1240//2)+40000//4, 
             np.arange(4, 21240//4 , 1240//2)+80000//4,
-            # np.arange(4, 21240//4 , 1240//2)+140000//4,
-            # np.arange(4, 21240//4 , 1240//2)+200000//4,
-            # np.arange(4, 21240//8 , 1240//2)+250000//4,
+            np.arange(4, 21240//4 , 1240//2)+140000//4,
+            np.arange(4, 21240//4 , 1240//2)+200000//4,
+            np.arange(4, 21240//8 , 1240//2)+250000//4,
+            np.arange(4, 21240//8 , 1240//2)+300000//4,
 
-            # (np.arange(4, 21240//8 , 1240//4), # 0.2 MHz
-            # np.arange(4, 21240//8 , 1240//4)+20000//4, 
-            # np.arange(4, 21240//8 , 1240//4)+50000//4, 
-            # np.arange(4, 21240//8 , 1240//4)+90000//4,
-            # np.arange(4, 21240//8 , 1240//4)+150000//4,
-
-            # (np.arange(4, 2124//8 , 124//4), # 2 MHz
-            #  np.arange(4, 2124//8 , 124//4)+10000//4, 
-            # np.arange(4, 2124//8 , 124//4)+20000//4, 
-            # np.arange(4, 2124//8 , 124//4)+50000//4, 
-            # np.arange(4, 2124//8 , 124//4)+80000//4,
-
-            # (np.arange(4, 80//4 , 1),  # 62.5 MHz
-            #  np.arange(4, 80//4 , 1)+3000//4,
-            #  np.arange(4, 80//4 , 1)+7000//4,
-            #  np.arange(4, 80//4 , 1)+10000//4, 
-            #  np.arange(4, 80//4 , 1)+13000//4, 
-            #  np.arange(4, 80//4 , 1)+17000//4, 
-            #  np.arange(4, 80//4 , 1)+20000//4, 
-            #  np.arange(4, 80//4 , 1)+25000//4, 
-            #  np.arange(4, 80//4 , 1)+30000//4, 
-            #  np.arange(4, 80//4 , 1)+40000//4,  
-            #  np.arange(4, 80//4 , 1)+50000//4,
-            #  np.arange(4, 2124//4 , 124//4)+80000//4,
             )
         )
+
+        #########################
+        ### End of User Input ###
+        #########################
 
         self.lenpq = len(self.probe_qubits)  # for plotting
 
@@ -94,7 +77,9 @@ class multiplex_ramsey:
         
         self.precomile_muliplexed_ramsey()
 
+
     def precomile_muliplexed_ramsey(self):
+        """Write and compile the programs"""
 
         self.data_handler = DataHandler(root_data_folder="./")
 
@@ -125,6 +110,8 @@ class multiplex_ramsey:
         #########################
         ### Precompile Pulses ###
         #########################
+        # Precompiling pulses into the config also boosts the compilation time
+
         # generate config pulses to match time sweep
         config_copy = deepcopy(config)  # copy the config for safety
 
@@ -167,14 +154,14 @@ class multiplex_ramsey:
         programs = []
         
         for i_i in range(self.program_divisions):
-            # program_code = f"""
-            with program() as multiplex_ramsey: #_{i_i}:
+            with program() as multiplex_ramsey: 
                 n = declare(int)  # QUA variable for the averaging loop
                 t = declare(int)  # QUA variable for the wait time
                 I_cases = declare(fixed)  # QUA variable for the measured 'I' quadrature in each case
                 Q_cases = declare(fixed)  # QUA variable for the measured 'Q' quadrature in each case
                 I_thresholded = declare(int)  # QUA variable for storing when I > or < voltage threshold
-                I_thresholded_st = declare_stream()  # Stream for the 'I' quadrature in each case
+                #NOTE: We only need 2 data streams, the probabilities, and the iteration number.
+                I_thresholded_st = declare_stream()  # Stream for the 'I' quadrature thresholded into probabilities
                 n_st = declare_stream()  # Stream for the averaging iteration 'n'
                 final_phase = declare(fixed, 0)
 
@@ -199,7 +186,7 @@ class multiplex_ramsey:
                                     dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_cases),
                                     dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_cases),
                                 )
-                                # Save the 'I_e' & 'Q_e' quadratures to their respective streams
+                                # Save only the Probabilities, which is all we need.
                                 assign(I_thresholded, Util.cond(I_cases>self.thresholds[i_q], 1, 0))
                                 save(I_thresholded, I_thresholded_st)
                             # Wait for the qubit to decay to the ground state
@@ -209,13 +196,10 @@ class multiplex_ramsey:
 
                 with stream_processing():
                     # Cast the data into a 1D vector, average the 1D vectors together and store the results on the OPX processor
-                    # If log sweep, then the swept values will be slightly different from np.logspace because of integer rounding in QUA.
-                    # get_equivalent_log_array() is used to get the exact values used in the QUA program.
                     
+                    # split the averaging by qubit and tau-swept
                     I_thresholded_st.buffer(self.lenpq).buffer(len(self.tau_arrays[i_i])).average().save(f"I_thresholded")
-                    n_st.save("iteration") #"""
-            # exec(program_code)
-            # eval(f'programs.append(multiplex_ramsey_{i_i})')
+                    n_st.save("iteration") 
             programs.append(multiplex_ramsey)
         self.programs = programs
         self.config = config_copy
@@ -224,10 +208,11 @@ class multiplex_ramsey:
         #####################################
         #  Open Communication with the QOP  #
         #####################################
+        # All jobs share the same QM
         qmm = QuantumMachinesManager(host=qop_ip, port=qop_port, cluster_name=cluster_name, octave=octave_config)
         # Open the quantum machine
-        # qm = qmm.open_qm(config)
         self.qm = qmm.open_qm(self.config)
+
         ###########################
         ### Precompile programs ###
         ###########################
@@ -237,7 +222,8 @@ class multiplex_ramsey:
             self.precompiled_programs.append(self.qm.compile(self.programs[i_i], compiler_options=my_compiler_options))
 
 
-    def run_multipled_ramsey(self):       
+    def run_multipled_ramsey(self): 
+        """Run the precompiled experiments"""      
         # Initialize data dicts
         self.data_dict = {resonator: {} for resonator in self.resonators}
         self.program_data_dict = {}
@@ -272,7 +258,6 @@ class multiplex_ramsey:
             print(job.execution_report())
             # Get results from QUA program
             fetch_names = ["iteration", "I_thresholded"]
-            # Get results from QUA program
             results = fetching_tool(job, data_list=fetch_names, mode="live")    # Live plotting
             # Live plotting. 
             fig, ax = plt.subplots(self.lenpq, 1, squeeze=False)
@@ -284,9 +269,12 @@ class multiplex_ramsey:
                 # Progress bar
                 progress_counter(iteration, self.n_avg, start_time=results.get_start_time())
                 P = job.result_handles.I_thresholded.fetch_all()
-                P = P.transpose()
+                P = P.transpose()  # transpose for more convenient indexing across qubits
                 N = job.result_handles.iteration.fetch_all()
+
+                # reinitialize data dicts for each program
                 self.program_data_dict[job.id] = {resonator: {} for resonator in self.resonators}
+
                 for i_pq, (pq, resonator) in enumerate(zip(self.probe_qubits, self.resonators)):
                     ax[i_pq, 0].cla()
                     ax[i_pq, 0].set_title(resonator)
@@ -312,7 +300,7 @@ class multiplex_ramsey:
         # Close all open plots
         for i_i in range(self.program_divisions):
             plt.close()
-        # Extract all data and sort into data_dict
+        # Extract all data from all programs and combine into one data_dict
         for resonator in self.resonators:
             for i_pd, data in enumerate(self.program_data_dict.values()):
                 # For python >= 3.7, insertion order of dictionaries is preserved, 
