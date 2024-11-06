@@ -20,9 +20,9 @@ from utils import *
 
 DATAFRAME_FILE = "./calibration_database.pkl"
 MAX_ATTEMPTS = 3
-AMPLITUDE_CHANGE_THRESHOLD = 0.50  # 10% deviation tolerated
-Q_FREQUENCY_CHANGE_THRESHOLD = 10_000  # 1.2 kHz tolerated
-RR_FREQUENCY_CHANGE_THRESHOLD = 200_000  # 10 kHz tolerated
+AMPLITUDE_CHANGE_THRESHOLD = 10 #0.50  # 10% deviation tolerated
+Q_FREQUENCY_CHANGE_THRESHOLD = 20_200_000  # 1.2 kHz tolerated
+RR_FREQUENCY_CHANGE_THRESHOLD = 600_000  # 10 kHz tolerated
 READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.50  # 10% deviation tolerated
 READOUT_DURATION_CHANGE_THRESHOLD = 0.25  # 5% deviation tolerated
 IQ_THRESHOLD = 90  # 90% Readout fidelity tolerated
@@ -170,6 +170,7 @@ class Node:
                     self.experiment_data_location = ''
 
                     try:
+                        print(f'current qubit: {qubit}')
                         self.calibration_measurement()
                         self.save_to_database()
                     except Exception as e:
@@ -521,23 +522,41 @@ class Resonator_Amplitude_Node(Node):
         self.n_avg = n_avg
 
 
+    def success_condition(
+            self, 
+            fidelity: float, 
+            ground_outliers: list, 
+            excited_outliers: list,
+        ):
+        if (fidelity > IQ_THRESHOLD) and (len(ground_outliers) < 2) and (len(excited_outliers) < 2):
+            self.calibration_success = True  
+        else:
+            self.calibration_success = False
+        print(f'calibration success: {self.calibration_success}')
+
+
     def calibration_measurement(self):
         """
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
         because the while loop terminates when it becomes True.
         """
 
-        optimal_amplitude, data_folder = readout_amplitude_binary_search(
+        results_dict = readout_amplitude_binary_search(
             qubit = self.current_qubit,
             resonator = qubit_resonator_correspondence[self.current_qubit]
         )
+        data_folder = results_dict['data_folder']
+        fidelity = results_dict['rotated']['best']['fidelity']
+        angle = results_dict['rotated']['best']['angle']
+        threshold = results_dict['rotated']['best']['threshold']
+        optimal_amplitude = results_dict['rotated']['best']['amplitude']
+        ground_outliers = results_dict['rotated']['best']['ground_outliers']
+        excited_outliers = results_dict['rotated']['best']['excited_outliers']
         self.experiment_data_location = data_folder
-        self.calibration_value = optimal_amplitude
-        self.success_condition(
-            calibration_value=self.calibration_value, 
-            threshold=AMPLITUDE_CHANGE_THRESHOLD, 
-            percent_change_bool=False
-        )
+        self.calibration_values = [optimal_amplitude, fidelity, angle, threshold]
+        self.miscellaneous.update({'results_dict': results_dict})
+        self.success_condition(fidelity, ground_outliers, excited_outliers)
+
 
 
 

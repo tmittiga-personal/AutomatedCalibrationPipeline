@@ -236,10 +236,14 @@ class Power_error_amplification:
         Q_lineout = np.mean(Q, axis=0)
 
         if np.abs(I_lineout.max() - I_lineout.min()) > np.abs(Q_lineout.max() - Q_lineout.min()):
-            self.lineout = I_lineout
-            self.is_negative_amplitude = True
+            self.lineout = I_lineout            
         else:
             self.lineout = Q_lineout
+
+        # determine if the peak is negative or positive. This method works for high enough contrast
+        if np.abs(self.lineout.min() - np.mean(self.lineout)) > np.abs(self.lineout.max() - np.mean(self.lineout)):
+            self.is_negative_amplitude = True
+        else:
             self.is_negative_amplitude = False
 
         fig_fit, fit_params, std_vec = self.peak_fit()
@@ -402,11 +406,11 @@ class Power_error_amplification:
 
 if __name__ == "__main__":
     pea = Power_error_amplification(
-        qubit = "q1_xy",
-        parameter_name = 'pi_',
+        qubit = "q5_xy",
+        parameter_name = 'pi_half_',
     )
     pea.power_rabi_pulse(
-        a_min = 0.75,
-        a_max = 1.25,
-        nb_pulse_step=2,
+        a_min = 0,
+        a_max = 2,
+        nb_pulse_step=4,
     )

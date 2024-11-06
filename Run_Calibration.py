@@ -10,7 +10,7 @@ from calibration_nodes import *
 import time
 
 ALL_QUBITS = QUBIT_CONSTANTS.keys()
-CALIBRATION_QUBITS = ["q1_xy","q3_xy","q5_xy"] #"q3_xy",
+CALIBRATION_QUBITS = ["q1_xy", "q3_xy"] #"q1_xy", "q3_xy", "q5_xy"] #"q3_xy",
 CALIBRATION_TIME_WINDOW = [datetime.strptime("17:00", "%H:%M").time(), datetime.strptime("17:00", "%H:%M").time()]
 
 def is_valid_time():
@@ -57,7 +57,7 @@ resonator_frequency_node = Readout_Frequency_Node(
 )
 
 resonator_amplitude_node = Resonator_Amplitude_Node(    
-    calibration_parameter_name = 'readout_amplitude',
+    calibration_parameter_name = ['readout_amplitude','readout_fidelity', 'readout_angle', 'readout_threshold'],
     qubits_to_calibrate = CALIBRATION_QUBITS,
     refresh_time = 3600*3,
     expiration_time = 3600*24,
@@ -114,7 +114,7 @@ if __name__ == "__main__":
 
             # resonator_weights_node.calibrate()
 
-            iq_blobs_node.calibrate()
+            # iq_blobs_node.calibrate()
 
             time.sleep(5*60)  # probe if a calibration is needed every 60 seconds
         

@@ -194,7 +194,7 @@ def readout_amplitude_binary_search(
 
         results_dict[READOUT_TYPE][iteration] = {
             "fidelity": fidelity,
-            "angle": angle,
+            "angle": np.mod(angle + RR_CONSTANTS[resonator]["rotation_angle"], 2*np.pi),  # Update angle
             "threshold": threshold,
             'ground_outliers': outliers_g,
             'excited_outliers': outliers_e,
@@ -210,12 +210,11 @@ def readout_amplitude_binary_search(
             best_amplitude = RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale
             best_fidelity = fidelity
             best_iteration = iteration
-            print(f'New Best Amplitude: {best_amplitude}')
+            print(f'Iteration {iteration}, New Best Amplitude: {best_amplitude}, Fidelity: {best_fidelity}')
 
         if high_enough_fidelity and not too_many_outliers:
             # We've achieved our goal. terminate
             still_testing = False
-            results_dict[READOUT_TYPE]['best'] = results_dict[READOUT_TYPE][best_iteration]
         else:
             if not high_enough_fidelity and not too_many_outliers:
                 amplitude_scale *= 0.5*ring_down[iteration]+1  # exponentially reduce scaling from 1.5 to 1
@@ -227,9 +226,10 @@ def readout_amplitude_binary_search(
         
 
         iteration += 1
+    results_dict[READOUT_TYPE]['best'] = results_dict[READOUT_TYPE][best_iteration]
     data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_resonator_amplitude_binary_search")
     results_dict['data_folder'] = data_folder
-    return best_amplitude, data_folder
+    return results_dict
 
 
 def cluster_deterimination(

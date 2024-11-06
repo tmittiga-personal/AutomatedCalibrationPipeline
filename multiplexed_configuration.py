@@ -9,12 +9,19 @@ ALL_QUBIT_NAMES = ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy"]
 CALIBRATION_QUBITS = ["q1_xy","q3_xy","q5_xy"]
 # True to overwrite values with automated calbiration values
 # False to use values as written in this file
-use_calibrated_values = True  
+use_calibrated_values = True 
+use_override_values = False
 if use_calibrated_values:
     calibration_dataframe = pull_latest_calibrated_values(
         qubits=ALL_QUBIT_NAMES,
         search_parameter_names=UPDATEABLE_PARAMETER_NAMES,
     )
+OVERRIDE_QUBIT_CONSTANTS = {}
+OVERRIDE_RR_CONSTANTS = {
+    "q1_rr": {
+        "amplitude": 0.002
+    }
+}
 
 
 #######################
@@ -71,7 +78,8 @@ twpa_status = True
 #                  Qubits                   #
 #############################################
 qubit_rotation_keys = ["x180", "x90", "minus_x90", "y180", "y90", "minus_y90"]
-qubit_LO = 3.3 * u.GHz
+qubit_LO = 3.285 * u.GHz
+shift_LO = 0
 # Constants for Pi Pulse
 PI_LENGTH = 100
 PI_SIGMA = PI_LENGTH / 5
@@ -81,8 +89,8 @@ amplitude_scaling = 0.5
 
 MULTIPLEX_DRIVE_CONSTANTS = {
     "drive1": {
-        "QUBITS": ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy"],
-        "LO": qubit_LO,
+        "QUBITS": ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy", "q1_ef"],
+        "LO": qubit_LO + shift_LO,
         "con": "con1",
         "octave": "octave1",
         "RF_port": 2,
@@ -101,7 +109,7 @@ QUBIT_CONSTANTS = {
         "anharmonicity": -200 * u.MHz,
         "drag_coefficient": 0.0,
         "ac_stark_shift": 0.0 * u.MHz,
-        "IF": -341403900,
+        "IF": -341403900 - shift_LO,
     },
     ALL_QUBIT_NAMES[1]: {
         "pi_amplitude": 0.0414,
@@ -112,7 +120,7 @@ QUBIT_CONSTANTS = {
         "anharmonicity": -180 * u.MHz,
         "drag_coefficient": 0.0,
         "ac_stark_shift": 0.0 * u.MHz,
-        "IF": -88 * u.MHz,
+        "IF": -88 * u.MHz - shift_LO,
     },
     ALL_QUBIT_NAMES[2]: {
         "pi_amplitude": 0.289,
@@ -123,7 +131,7 @@ QUBIT_CONSTANTS = {
         "anharmonicity": -190 * u.MHz,
         "drag_coefficient": 0.0,
         "ac_stark_shift": 0.0 * u.MHz,
-        "IF": 31.14558 * u.MHz + 0.01 * u.MHz,
+        "IF": 31.14558 * u.MHz + 0.01 * u.MHz - shift_LO,
     },
     ALL_QUBIT_NAMES[3]: {
         "pi_amplitude": 0.0944/3,
@@ -134,7 +142,7 @@ QUBIT_CONSTANTS = {
         "anharmonicity": -185 * u.MHz,
         "drag_coefficient": 0.0,
         "ac_stark_shift": 0.0 * u.MHz,
-        "IF": -31 * u.MHz,
+        "IF": -31 * u.MHz - shift_LO,
     },
     ALL_QUBIT_NAMES[4]: {
         "pi_amplitude": 0.2273,
@@ -145,7 +153,7 @@ QUBIT_CONSTANTS = {
         "anharmonicity": -150 * u.MHz,
         "drag_coefficient": 0.0,
         "ac_stark_shift": 0.0 * u.MHz,
-        "IF": 141.9014 * u.MHz,
+        "IF": 141.9014 * u.MHz - shift_LO,
     },
     ALL_QUBIT_NAMES[5]: {
         "pi_amplitude": 0.1797,
@@ -156,7 +164,18 @@ QUBIT_CONSTANTS = {
         "anharmonicity": -150 * u.MHz,
         "drag_coefficient": 0.0,
         "ac_stark_shift": 0.0 * u.MHz,
-        "IF": 322.30683 * u.MHz -78*u.kHz,
+        "IF": 322.30683 * u.MHz -78*u.kHz - shift_LO,
+    },
+    'q1_ef': {
+        "pi_amplitude": 0.23,
+        "pi_half_amplitude": 0.25/2,
+        "pi_len": 160,
+        "pi_half_len": 160,
+        "pi_sigma": 160/5, 
+        "anharmonicity": -150 * u.MHz,
+        "drag_coefficient": 0.0,
+        "ac_stark_shift": 0.0 * u.MHz,
+        "IF": -492.2*u.MHz - shift_LO,
     },
 }
 if use_calibrated_values:
@@ -174,7 +193,7 @@ if use_calibrated_values:
                     calibration_dataframe.loc[
                         (calibration_dataframe.qubit_name == qubit_key) &
                         (calibration_dataframe.calibration_parameter_name == 'IF')
-                    ]['calibration_value'].values[0]
+                    ]['calibration_value'].values[0] - shift_LO
             elif SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in constants.keys():
                 QUBIT_CONSTANTS[qubit_key][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
                     calibration_dataframe.loc[
@@ -182,14 +201,23 @@ if use_calibrated_values:
                         (calibration_dataframe.calibration_parameter_name == param)
                     ]['calibration_value'].values[0]
     print('QUBIT_CONSTANTS pulled from calibration_database.pkl')
+if use_override_values:
+    for qubit_key, constants in zip(CALIBRATION_QUBITS, QUBIT_CONSTANTS.values()):
+        if qubit_key in OVERRIDE_QUBIT_CONSTANTS:
+            for param in OVERRIDE_QUBIT_CONSTANTS[qubit_key]:
+                if param in constants.keys():
+                    QUBIT_CONSTANTS[qubit_key][param] = OVERRIDE_QUBIT_CONSTANTS[qubit_key][param]
+                    print(f'Overwrote QUBIT_CONSTANTS[{qubit_key}][{param}]')
+
+
 
 # Relaxation time
 qubit_T1 = int(200 * u.us)
 thermalization_time = 5 * qubit_T1
 
 # Saturation_pulse
-saturation_len = 50 * u.us
-saturation_amp = 0.45
+saturation_len = 0.16*u.us #50 * u.us #
+saturation_amp = 0.16 #0.45 #
 
 def generate_waveforms(rotation_keys):
     """ Generate all necessary waveforms for a set of rotation types across all qubits. """
@@ -203,6 +231,7 @@ def generate_waveforms(rotation_keys):
         amp = constants["pi_amplitude"]
         ph_amp = constants["pi_half_amplitude"]
         pi_len = constants["pi_len"]
+        pi_half__len = constants["pi_half_len"]
         pi_sigma = constants["pi_sigma"]
         drag_coef = constants["drag_coefficient"]
         ac_stark_shift = constants["ac_stark_shift"]
@@ -211,14 +240,17 @@ def generate_waveforms(rotation_keys):
         for rotation_key in rotation_keys:
             if rotation_key in ["x180", "y180"]:
                 wf_amp = amp
+                plen = pi_len
             elif rotation_key in ["x90", "y90"]:
                 wf_amp = ph_amp
+                plen = pi_half__len
             elif rotation_key in ["minus_x90", "minus_y90"]:
                 wf_amp = -ph_amp
+                plen = pi_half__len
             else:
                 continue
 
-            wf, der_wf = np.array(drag_gaussian_pulse_waveforms(wf_amp, pi_len, pi_sigma, drag_coef, anharmonicity, ac_stark_shift))
+            wf, der_wf = np.array(drag_gaussian_pulse_waveforms(wf_amp, plen, pi_sigma, drag_coef, anharmonicity, ac_stark_shift))
 
             if rotation_key.startswith("x") or rotation_key == "minus_x90":
                 I_wf = wf
@@ -353,6 +385,13 @@ if use_calibrated_values:
                 except Exception as e:
                     print(e)
     print('RR_CONSTANTS pulled from calibration_database.pkl')
+if use_override_values:
+    for resonator_key, constants in zip(RR_CONSTANTS.keys(), RR_CONSTANTS.values()):
+        if resonator_key in OVERRIDE_RR_CONSTANTS:
+            for param in OVERRIDE_RR_CONSTANTS[resonator_key]:
+                if param in constants.keys():
+                    RR_CONSTANTS[resonator_key][param] = OVERRIDE_RR_CONSTANTS[resonator_key][param]
+                    print(f'Overwrote RR_CONSTANTS[{resonator_key}][{param}]')
 
 weights_dict = {}
 for i_q, key in enumerate(RR_CONSTANTS.keys()):
@@ -492,7 +531,7 @@ config = {
         **{f"x90_pulse_{key}":
             {
                 "operation": "control",
-                "length": QUBIT_CONSTANTS[key]["pi_len"],
+                "length": QUBIT_CONSTANTS[key]["pi_half_len"],
                 "waveforms": {
                     "I": f"x90_I_wf_{key}",
                     "Q": f"x90_Q_wf_{key}"
@@ -516,7 +555,7 @@ config = {
         **{f"-x90_pulse_{key}":
             {
                 "operation": "control",
-                "length": QUBIT_CONSTANTS[key]["pi_len"],
+                "length": QUBIT_CONSTANTS[key]["pi_half_len"],
                 "waveforms": {
                     "I": f"minus_x90_I_wf_{key}",
                     "Q": f"minus_x90_Q_wf_{key}"
@@ -528,7 +567,7 @@ config = {
         **{f"y90_pulse_{key}":
             {
                 "operation": "control",
-                "length": QUBIT_CONSTANTS[key]["pi_len"],
+                "length": QUBIT_CONSTANTS[key]["pi_half_len"],
                 "waveforms": {
                     "I": f"y90_I_wf_{key}",
                     "Q": f"y90_Q_wf_{key}"
@@ -552,7 +591,7 @@ config = {
         **{f"-y90_pulse_{key}":
             {
                 "operation": "control",
-                "length": QUBIT_CONSTANTS[key]["pi_len"],
+                "length": QUBIT_CONSTANTS[key]["pi_half_len"],
                 "waveforms": {
                     "I": f"minus_y90_I_wf_{key}",
                     "Q": f"minus_y90_Q_wf_{key}"
