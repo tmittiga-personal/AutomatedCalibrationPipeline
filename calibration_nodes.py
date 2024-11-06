@@ -107,7 +107,7 @@ class Node:
     def calibrate(
         self,
         initialize = False,
-    ):
+    ) -> bool:
         """
         Perform the calibration.
 
@@ -186,7 +186,7 @@ class Node:
                     self.miscellaneous['Exception Log'] = self.exception_log
                     self.save_to_database()
         # self.update_calibration_configuration()
-        return
+        return self.calibration_success
     
         
     def success_condition(
