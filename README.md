@@ -9,7 +9,7 @@ Note, I wrote this pipeline in about a week: and have been slowly cleaning and o
 For those unfamiliar with the terms, a "pipeline" is a chain of modules where the output of one module is the input of the next.
 In the case of a calibration pipeline, the calibration parameters are updated and used in each subsequent module.
 A "node" is an object controlling the full calibration measurement and data processing that produces one or more calibration parameters.
-Multiple nodes make us the pipeline chain, each node producing a subset of the entire set of calibration parameters.
+Multiple nodes make up the pipeline chain, each node producing a subset of the entire set of calibration parameters.
 The automation involved is the timing of running each node and logic governing how nodes relate to or trigger each other.
 
 The pipeline, as is, is capable of recalibrating qubit pulses (pi and pi/2) and readout (resonator frequency, pulse duration, pulse amplitude).
@@ -18,7 +18,15 @@ Some modules, notably `readout_amplitude_binary_search.py` and `qubit_power_erro
 Others, such as `ramsey_w_virtual_rotation.py` and `readout_frequency_optimization.py` are slow, but robust, as the apparatus currently needs.
 
 
-Job Queue
+### Job Queue
+A job queue is a queue that manages which parts of an experiment run at what times.
+For example, if multiple users want to submit experiments to the same Quantum Machines, the job queue would decide the order in which the experiments (or parts of an experiment) run.
+This is particularly important for a fully automated calibration pipeline because it would permit running the pipeline constantly in the background.
+Then, manually submitted experiments (eg experiments during business hours for research purposes) could interleave seamlessly with calibrations occurring at regular intervals.
+
+Having the job queue manage ALL experiments submitted to the Quantum Machines controlling our one apparatus is a low priority for our academic research and calibration needs, which is why it is not ubiquitous in all the experiments of this pipeline.
+Still, I have found the job queue necessary for splitting up large experiments into smaller memory chunks that the Quantum Machines can handle.
+Since no one at LPS has used the Quantum Machines job queue, I have included an example of using the Quantum Machines job queue: `job_queue_example_multiplex_ramsey_with_virtual_rotation.py`.
 
 
 ## Instructions
