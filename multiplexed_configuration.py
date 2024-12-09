@@ -16,11 +16,27 @@ if use_calibrated_values:
         qubits=ALL_QUBIT_NAMES,
         search_parameter_names=UPDATEABLE_PARAMETER_NAMES,
     )
-OVERRIDE_QUBIT_CONSTANTS = {}
+OVERRIDE_QUBIT_CONSTANTS = {
+    # "q1_xy": {
+    #     "IF": -3.413e+08	-95000	,
+    # },   
+    # "q3_xy": {
+    #     "IF": 3.115e7	,
+    # }, 
+    # "q5_xy": {
+    #     "IF": 1.4188e+08 ,
+    # },
+}
 OVERRIDE_RR_CONSTANTS = {
-    "q1_rr": {
-        "amplitude": 0.002
-    }
+    # "q1_rr": {
+    #     "IF": 92.25*1e6
+    # },
+    # "q3_rr": {
+    #     "IF": 1.5685*1e8
+    # },
+    # "q5_rr": {
+    #     "IF": 2.111 * 1e8
+    # }
 }
 
 
@@ -78,8 +94,8 @@ twpa_status = True
 #                  Qubits                   #
 #############################################
 qubit_rotation_keys = ["x180", "x90", "minus_x90", "y180", "y90", "minus_y90"]
-qubit_LO = 3.285 * u.GHz
-shift_LO = 0
+qubit_LO = 3.3 * u.GHz
+shift_LO = 0 * u.GHz
 # Constants for Pi Pulse
 PI_LENGTH = 100
 PI_SIGMA = PI_LENGTH / 5
@@ -175,7 +191,7 @@ QUBIT_CONSTANTS = {
         "anharmonicity": -150 * u.MHz,
         "drag_coefficient": 0.0,
         "ac_stark_shift": 0.0 * u.MHz,
-        "IF": -492.2*u.MHz - shift_LO,
+        "IF": 0, #-492.2*u.MHz - shift_LO,
     },
 }
 if use_calibrated_values:

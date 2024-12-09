@@ -22,9 +22,9 @@ DATAFRAME_FILE = "./calibration_database.pkl"
 MAX_ATTEMPTS = 3
 AMPLITUDE_CHANGE_THRESHOLD = 10 #0.50  # 10% deviation tolerated
 Q_FREQUENCY_CHANGE_THRESHOLD = 20_200_000  # 1.2 kHz tolerated
-RR_FREQUENCY_CHANGE_THRESHOLD = 600_000  # 10 kHz tolerated
+RR_FREQUENCY_CHANGE_THRESHOLD = 1_600_000  # 10 kHz tolerated
 READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.50  # 10% deviation tolerated
-READOUT_DURATION_CHANGE_THRESHOLD = 0.25  # 5% deviation tolerated
+READOUT_DURATION_CHANGE_THRESHOLD = 0.75  # 5% deviation tolerated
 IQ_THRESHOLD = 90  # 90% Readout fidelity tolerated
 
 

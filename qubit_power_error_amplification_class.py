@@ -407,10 +407,10 @@ class Power_error_amplification:
 if __name__ == "__main__":
     pea = Power_error_amplification(
         qubit = "q5_xy",
-        parameter_name = 'pi_half_',
+        parameter_name = 'pi_half_', #half_
     )
     pea.power_rabi_pulse(
         a_min = 0,
-        a_max = 2,
+        a_max = 3,
         nb_pulse_step=4,
     )

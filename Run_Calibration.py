@@ -10,7 +10,7 @@ from calibration_nodes import *
 import time
 
 ALL_QUBITS = QUBIT_CONSTANTS.keys()
-CALIBRATION_QUBITS = ["q1_xy", "q3_xy"] #"q1_xy", "q3_xy", "q5_xy"] #"q3_xy",
+CALIBRATION_QUBITS = ["q1_xy", "q3_xy", "q5_xy"] #"q3_xy", "q1_xy", 
 CALIBRATION_TIME_WINDOW = [datetime.strptime("17:00", "%H:%M").time(), datetime.strptime("17:00", "%H:%M").time()]
 
 def is_valid_time():
@@ -94,23 +94,24 @@ iq_blobs_node = IQ_Blobs_Node(
 
 # Set the order of nodes
 # You can also implement any dependency logic here.
+initialize_bool = True
 
 if __name__ == "__main__":
 
     while True:
         while is_valid_time():
             
-            qubit_frequency_node.calibrate()
+            qubit_frequency_node.calibrate(initialize=initialize_bool)
 
-            pi_amplitude_node.calibrate()
+            pi_amplitude_node.calibrate(initialize=initialize_bool)
 
-            pi_half_amplitude_node.calibrate()
+            pi_half_amplitude_node.calibrate(initialize=initialize_bool)
 
-            resonator_frequency_node.calibrate()
+            resonator_frequency_node.calibrate(initialize=initialize_bool)
 
-            resonator_duration_node.calibrate()
+            resonator_duration_node.calibrate(initialize=initialize_bool)
 
-            resonator_amplitude_node.calibrate()
+            resonator_amplitude_node.calibrate(initialize=initialize_bool)
 
             # resonator_weights_node.calibrate()
 
