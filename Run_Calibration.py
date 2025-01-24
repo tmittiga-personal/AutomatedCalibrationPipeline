@@ -9,8 +9,7 @@ TODO: Use asyncio to permit running this script in the background and interleavi
 from calibration_nodes import *
 import time
 
-ALL_QUBITS = QUBIT_CONSTANTS.keys()
-CALIBRATION_QUBITS = ["q1_xy", "q3_xy", "q5_xy"] #"q3_xy", "q1_xy", 
+CALIBRATION_QUBITS = ["q1_xy"] #, "q3_xy", "q5_xy"] #"q3_xy", "q1_xy", 
 CALIBRATION_TIME_WINDOW = [datetime.strptime("17:00", "%H:%M").time(), datetime.strptime("17:00", "%H:%M").time()]
 
 def is_valid_time():

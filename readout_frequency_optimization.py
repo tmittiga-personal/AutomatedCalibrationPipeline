@@ -18,7 +18,7 @@ Next steps before going to the next node:
 from qm.qua import *
 from qm import QuantumMachinesManager
 from qm import SimulationConfig
-from multiplexed_configuration import *
+from create_multiplexed_configuration import *
 from qualang_tools.results import progress_counter, fetching_tool
 from qualang_tools.plot import interrupt_on_close
 from qualang_tools.loops import from_array
@@ -83,6 +83,7 @@ def readout_frequency_optimization(
     qubit,
     resonator,
 ):
+    mc = create_multiplexed_configuration()
     
     data_handler = DataHandler(root_data_folder="./")
 
@@ -91,21 +92,21 @@ def readout_frequency_optimization(
     ###################
     n_avg = 4000  # The number of averages
     # The frequency sweep parameters
-    span = 1 * u.MHz
-    df = 60 * u.kHz
+    span = 1 * mc.u.MHz
+    df = 60 * mc.u.kHz
     dfs = np.arange(-span, +span + 0.1, df)
 
     ro_freq_opt_data = {
         "n_runs": n_avg,
         "dfs": dfs,
-        "Twpa_status": twpa_status,
-        "resonator_LO": RL_CONSTANTS["rl1"]["LO"],
-        "readout_amp": RR_CONSTANTS[resonator]["amplitude"],
-        "resonator_IF": RR_CONSTANTS[resonator]['IF'],
-        "qubit_LO": MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
-        "qubit_IF": QUBIT_CONSTANTS[qubit]["IF"],
-        "qubit_octave_gain": qubit_octave_gain,
-        "resonator_octave_gain": resonator_octave_gain,
+        "Twpa_status": mc.twpa_status,
+        "resonator_LO": mc.RL_CONSTANTS["rl1"]["LO"],
+        "readout_amp": mc.RR_CONSTANTS[resonator]["amplitude"],
+        "resonator_IF": mc.RR_CONSTANTS[resonator]['IF'],
+        "qubit_LO": mc.MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
+        "qubit_IF": mc.QUBIT_CONSTANTS[qubit]["IF"],
+        "qubit_octave_gain": mc.qubit_octave_gain,
+        "resonator_octave_gain": mc.resonator_octave_gain,
     }
 
     with program() as ro_freq_opt:
@@ -124,9 +125,9 @@ def readout_frequency_optimization(
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(df, dfs)):
                 # Update the frequency of the digital oscillator linked to the resonator element
-                update_frequency(resonator, df + RR_CONSTANTS[resonator]['IF'])
+                update_frequency(resonator, df + mc.RR_CONSTANTS[resonator]['IF'])
                 # Measure the state of the resonator
-                if RR_CONSTANTS[resonator]["use_opt_readout"]:
+                if mc.RR_CONSTANTS[resonator]["use_opt_readout"]:
                     measure(
                         "readout",
                         resonator,
@@ -143,7 +144,7 @@ def readout_frequency_optimization(
                         dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_g),
                     )
                 # Wait for the qubit to decay to the ground state
-                wait(thermalization_time * u.ns, resonator)
+                wait(mc.thermalization_time * mc.u.ns, resonator)
                 # Save the 'I_e' & 'Q_e' quadratures to their respective streams
                 save(I_g, Ig_st)
                 save(Q_g, Qg_st)
@@ -154,7 +155,7 @@ def readout_frequency_optimization(
                 # Align the two elements to measure after playing the qubit pulse.
                 align(qubit, resonator)
                 # Measure the state of the resonator
-                if RR_CONSTANTS[resonator]["use_opt_readout"]:
+                if mc.RR_CONSTANTS[resonator]["use_opt_readout"]:
                     measure(
                         "readout",
                         resonator,
@@ -171,7 +172,7 @@ def readout_frequency_optimization(
                         dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_e),
                     )
                 # Wait for the qubit to decay to the ground state
-                wait(thermalization_time * u.ns, resonator)
+                wait(mc.thermalization_time * mc.u.ns, resonator)
                 # Save the 'I_e' & 'Q_e' quadratures to their respective streams
                 save(I_e, Ie_st)
                 save(Q_e, Qe_st)
@@ -206,7 +207,12 @@ def readout_frequency_optimization(
     #####################################
     #  Open Communication with the QOP  #
     #####################################
-    qmm = QuantumMachinesManager(host=qop_ip, port=qop_port, cluster_name=cluster_name, octave=octave_config)
+    qmm = QuantumMachinesManager(
+        host=mc.qop_ip, 
+        port=mc.qop_port, 
+        cluster_name=mc.cluster_name, 
+        octave=mc.octave_config
+    )
 
     ###########################
     # Run or Simulate Program #
@@ -216,12 +222,12 @@ def readout_frequency_optimization(
     if simulate:
         # Simulates the QUA program for the specified duration
         simulation_config = SimulationConfig(duration=10_000)  # In clock cycles = 4ns
-        job = qmm.simulate(config, ro_freq_opt, simulation_config)
+        job = qmm.simulate(mc.config, ro_freq_opt, simulation_config)
         job.get_simulated_samples().con1.plot()
 
     else:
         # Open the quantum machine
-        qm = qmm.open_qm(config)
+        qm = qmm.open_qm(mc.config)
         # Send the QUA program to the OPX, which compiles and executes it
         job = qm.execute(ro_freq_opt)  # execute QUA program
         # Get results from QUA program
@@ -244,8 +250,8 @@ def readout_frequency_optimization(
             SNR = ((np.abs(Z)) ** 2) / (2 * var)
             # Plot results
             plt.cla()
-            plt.plot(dfs / u.MHz, SNR, ".-")
-            plt.title(f"Readout frequency optimization around {RR_CONSTANTS[resonator]['IF'] / u.MHz} MHz")
+            plt.plot(dfs / mc.u.MHz, SNR, ".-")
+            plt.title(f"Readout frequency optimization around {mc.RR_CONSTANTS[resonator]['IF'] / mc.u.MHz} MHz")
             plt.xlabel("Readout frequency detuning [MHz]")
             plt.ylabel("SNR")
             plt.grid("on")
@@ -273,7 +279,7 @@ def readout_frequency_optimization(
                 'background': std_vec[3],
             },
         }
-        ro_freq_opt_data["base_frequency"] = RR_CONSTANTS[resonator]['IF']
+        ro_freq_opt_data["base_frequency"] = mc.RR_CONSTANTS[resonator]['IF']
         ro_freq_opt_data["Ig_avg"] = Ig_avg
         ro_freq_opt_data["Qg_avg"] = Qg_avg
         ro_freq_opt_data["Ie_avg"] = Ie_avg
@@ -289,4 +295,5 @@ def readout_frequency_optimization(
         data_folder = data_handler.save_data(ro_freq_opt_data, name=f"{resonator}_ro_freq_opt")
 
         plt.close()
-        return fit_dict, data_folder
+        cal_val = mc.RR_CONSTANTS[mc.qubit_resonator_correspondence[qubit]]['IF'] + fit_dict['fit_values']['center']
+        return cal_val, fit_dict, data_folder

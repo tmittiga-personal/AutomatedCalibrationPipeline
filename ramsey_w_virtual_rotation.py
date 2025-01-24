@@ -19,7 +19,7 @@ Next steps before going to the next node:
 from qm.qua import *
 from qm import QuantumMachinesManager
 from qm import SimulationConfig
-from multiplexed_configuration import *
+from create_multiplexed_configuration import *
 from utils import *
 from qualang_tools.results import progress_counter, fetching_tool
 from qualang_tools.plot import interrupt_on_close
@@ -36,11 +36,12 @@ class Ramsey_w_virtual_rotation:
         self, 
         qubit: str,
         n_avg: int = 10000,
-        detuning: float = 2* u.MHz,  # in Hz
+        detuning: float = 2e6,  # in Hz
         taus: np.typing.NDArray = DEFAULT_TAUS,
     ):
+        self.mc = create_multiplexed_configuration()
         self.qubit = qubit
-        self.resonator = qubit_resonator_correspondence[self.qubit]
+        self.resonator = self.mc.qubit_resonator_correspondence[self.qubit]
         self.n_avg = n_avg
         self.detuning = detuning
         self.taus = taus
@@ -72,12 +73,12 @@ class Ramsey_w_virtual_rotation:
         
         ramsey_w_virtual_rotation_data = {
             "n_avg": n_avg,
-            "resonator_LO": RL_CONSTANTS["rl1"]["LO"],
-            "readout_amp": RR_CONSTANTS[qubit_resonator_correspondence[self.qubit]]["amplitude"],
-            "qubit_LO": MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
-            "qubit_IF": QUBIT_CONSTANTS[self.qubit]["IF"],
-            "qubit_octave_gain": qubit_octave_gain,
-            "resonator_octave_gain": resonator_octave_gain,
+            "resonator_LO": self.mc.RL_CONSTANTS["rl1"]["LO"],
+            "readout_amp": self.mc.RR_CONSTANTS[self.mc.qubit_resonator_correspondence[self.qubit]]["amplitude"],
+            "qubit_LO": self.mc.MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
+            "qubit_IF": self.mc.QUBIT_CONSTANTS[self.qubit]["IF"],
+            "qubit_octave_gain": self.mc.qubit_octave_gain,
+            "resonator_octave_gain": self.mc.resonator_octave_gain,
         }
 
         with program() as ramsey:
@@ -110,7 +111,7 @@ class Ramsey_w_virtual_rotation:
                     # Align the two elements to measure after playing the qubit pulse.
                     align(self.qubit, self.resonator)
                     # Measure the state of the resonator
-                    if RR_CONSTANTS[self.resonator]["use_opt_readout"]:
+                    if self.mc.RR_CONSTANTS[self.resonator]["use_opt_readout"]:
                         measure(
                             "readout",
                             self.resonator,
@@ -128,9 +129,9 @@ class Ramsey_w_virtual_rotation:
                         )
                     
                     # Wait for the qubit to decay to the ground state
-                    wait(thermalization_time * u.ns, self.resonator)
+                    wait(self.mc.thermalization_time * self.mc.u.ns, self.resonator)
                     # State discrimination
-                    assign(state, I > RR_CONSTANTS[self.resonator]['ge_threshold'])
+                    assign(state, I > self.mc.RR_CONSTANTS[self.resonator]['ge_threshold'])
                     # Save the 'I', 'Q' and 'state' to their respective streams
                     save(I, I_st)
                     save(Q, Q_st)
@@ -150,8 +151,12 @@ class Ramsey_w_virtual_rotation:
         #####################################
         #  Open Communication with the QOP  #
         #####################################
-        qmm = QuantumMachinesManager(host=qop_ip, port=qop_port, cluster_name=cluster_name, octave=octave_config)
-
+        qmm = QuantumMachinesManager(
+            host=self.mc.qop_ip, 
+            port=self.mc.qop_port, 
+            cluster_name=self.mc.cluster_name, 
+            octave=self.mc.octave_config
+        )
         ###########################
         # Run or Simulate Program #
         ###########################
@@ -159,11 +164,11 @@ class Ramsey_w_virtual_rotation:
         if simulate:
             # Simulates the QUA program for the specified duration
             simulation_config = SimulationConfig(duration=10_000)  # In clock cycles = 4ns
-            job = qmm.simulate(config, ramsey, simulation_config)
+            job = qmm.simulate(self.mc.config, ramsey, simulation_config)
             job.get_simulated_samples().con1.plot()
         else:
             # Open the quantum machine
-            qm = qmm.open_qm(config)
+            qm = qmm.open_qm(self.mc.config)
             # Send the QUA program to the OPX, which compiles and executes it
             job = qm.execute(ramsey)
             # Get results from QUA program
@@ -175,11 +180,12 @@ class Ramsey_w_virtual_rotation:
                 # Fetch results
                 I, Q, state, iteration = results.fetch_all()
                 # Convert the results into Volts
-                I, Q = u.demod2volts(I, RR_CONSTANTS[self.resonator]["readout_length"]), u.demod2volts(Q, RR_CONSTANTS[self.resonator]["readout_length"])
+                I = self.mc.u.demod2volts(I, self.mc.RR_CONSTANTS[self.resonator]["readout_length"])
+                Q = self.mc.u.demod2volts(Q, self.mc.RR_CONSTANTS[self.resonator]["readout_length"])
                 # Progress bar
                 progress_counter(iteration, n_avg, start_time=results.get_start_time())
                 # Plot results
-                plt.suptitle(f"Ramsey with frame rotation (detuning={detuning / u.MHz} MHz)")
+                plt.suptitle(f"Ramsey with frame rotation (detuning={detuning / self.mc.u.MHz} MHz)")
                 plt.subplot(311)
                 plt.cla()
                 plt.plot(4 * taus, I, ".")
@@ -218,14 +224,14 @@ class Ramsey_w_virtual_rotation:
 
             ramsey_fit = fit.ramsey(4 * taus, fit_data, plot=True)
             qubit_T2 = np.abs(ramsey_fit["T2"][0])
-            qubit_detuning = ramsey_fit["f"][0] * u.GHz - detuning
+            qubit_detuning = ramsey_fit["f"][0] * self.mc.u.GHz - detuning
             plt.xlabel("Idle time [ns]")
             plt.ylabel(y_label)
             print(f"Qubit detuning to update in the config: qubit_IF += {-qubit_detuning:.0f} Hz")
             print(f"T2* = {qubit_T2:.0f} ns")
-            plt.legend((f"detuning = {-qubit_detuning / u.kHz:.3f} kHz", f"T2* = {qubit_T2:.0f} ns"))
+            plt.legend((f"detuning = {-qubit_detuning / self.mc.u.kHz:.3f} kHz", f"T2* = {qubit_T2:.0f} ns"))
             plt.title("Ramsey measurement with virtual Z rotations")
-            print(f"Detuning to add: {-qubit_detuning / u.kHz:.3f} kHz")
+            print(f"Detuning to add: {-qubit_detuning / self.mc.u.kHz:.3f} kHz")
             fit_dict = {
                 'qubit_detuning': -qubit_detuning,
                 'fit_values': {
@@ -256,4 +262,5 @@ class Ramsey_w_virtual_rotation:
                 name=f"{self.qubit}_ramsey_w_virtual_rotation"
             )
             plt.close()
-            return fit_dict, data_folder
+            cal_val = self.mc.QUBIT_CONSTANTS[self.qubit]["IF"] + fit_dict['qubit_detuning']
+            return cal_val, fit_dict, data_folder

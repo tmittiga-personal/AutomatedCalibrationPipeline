@@ -22,7 +22,6 @@ from qm import SimulationConfig
 from qm import QuantumMachinesManager
 from multiplexed_configuration import *
 from utils import *
-from qualang_tools.analysis.discriminator import two_state_discriminator_plot
 from qualang_tools.results.data_handler import DataHandler
 import matplotlib.pyplot as plt
 
@@ -155,7 +154,7 @@ def IQ_blobs_comparison(
             Qe = res_handles.get("Q_e").fetch_all()["value"]
             # Plot the IQ blobs, rotate them to get the separation along the 'I' quadrature, estimate a threshold between them
             # for state discrimination and derive the fidelity matrix
-            angle, threshold, fidelity, gg, ge, eg, ee, fig = two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=True, b_plot=True)
+            angle, threshold, fidelity, gg, ge, eg, ee, fig = two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=True)
             
             #########################################
             # The two_state_discriminator gives us the rotation angle which makes it such that all of the information will be in

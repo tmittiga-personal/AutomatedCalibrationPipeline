@@ -21,27 +21,26 @@ Before proceeding to the next node:
 from qm.qua import *
 from qm import QuantumMachinesManager
 from qm import SimulationConfig
-from multiplexed_configuration import *
+from create_multiplexed_configuration import *
 from qualang_tools.results import progress_counter, fetching_tool
 from qualang_tools.plot import interrupt_on_close
 import matplotlib.pyplot as plt
 from qualang_tools.results.data_handler import DataHandler
 
-
 ####################
 # Helper functions #
 ####################
-def update_readout_length(resonator, new_readout_length, ringdown_length):
-    config["pulses"][f"readout_pulse_{resonator}"]["length"] = new_readout_length
-    config["integration_weights"]["cosine_weights"] = {
+def update_readout_length(resonator, new_readout_length, ringdown_length, mc):
+    mc.config["pulses"][f"readout_pulse_{resonator}"]["length"] = new_readout_length
+    mc.config["integration_weights"]["cosine_weights"] = {
         "cosine": [(1.0, new_readout_length + ringdown_length)],
         "sine": [(0.0, new_readout_length + ringdown_length)],
     }
-    config["integration_weights"]["sine_weights"] = {
+    mc.config["integration_weights"]["sine_weights"] = {
         "cosine": [(0.0, new_readout_length + ringdown_length)],
         "sine": [(1.0, new_readout_length + ringdown_length)],
     }
-    config["integration_weights"]["minus_sine_weights"] = {
+    mc.config["integration_weights"]["minus_sine_weights"] = {
         "cosine": [(0.0, new_readout_length + ringdown_length)],
         "sine": [(-1.0, new_readout_length + ringdown_length)],
     }
@@ -51,15 +50,16 @@ def readout_duration_optimization(
     qubit,
     resonator,
 ):
+    mc = create_multiplexed_configuration()
     data_handler = DataHandler(root_data_folder="./")
     ###################
     # The QUA program #
     ###################
     n_avg = 1e4  # number of averages
     # Set maximum readout duration for this scan and update the configuration accordingly
-    readout_len = 6 * u.us  # Readout pulse duration
-    ringdown_len = 4 * u.us  # integration time after readout pulse to observe the ringdown of the resonator
-    update_readout_length(resonator, readout_len, ringdown_len)
+    readout_len = 6 * mc.u.us  # Readout pulse duration
+    ringdown_len = 4 * mc.u.us  # integration time after readout pulse to observe the ringdown of the resonator
+    update_readout_length(resonator, readout_len, ringdown_len, mc)
     # Set the accumulated demod parameters
     division_length = 10  # Size of each demodulation slice in clock cycles
     number_of_divisions = int((readout_len + ringdown_len) / (4 * division_length))
@@ -105,7 +105,7 @@ def readout_duration_optimization(
                 assign(Q[ind], QQ[ind] + QI[ind])
                 save(Q[ind], Qg_st)
             # Wait for the qubit to decay to the ground state
-            wait(thermalization_time * u.ns, resonator)
+            wait(mc.thermalization_time * mc.u.ns, resonator)
 
             align()
 
@@ -130,7 +130,7 @@ def readout_duration_optimization(
                 save(Q[ind], Qe_st)
 
             # Wait for the qubit to decay to the ground state
-            wait(thermalization_time * u.ns, resonator)
+            wait(mc.thermalization_time * mc.u.ns, resonator)
             # Save the averaging iteration to get the progress bar
             save(n, n_st)
 
@@ -162,7 +162,12 @@ def readout_duration_optimization(
     #####################################
     #  Open Communication with the QOP  #
     #####################################
-    qmm = QuantumMachinesManager(host=qop_ip, port=qop_port, cluster_name=cluster_name, octave=octave_config)
+    qmm = QuantumMachinesManager(
+        host=mc.qop_ip, 
+        port=mc.qop_port, 
+        cluster_name=mc.cluster_name, 
+        octave=mc.octave_config
+    )
 
     ###########################
     # Run or Simulate Program #
@@ -172,11 +177,11 @@ def readout_duration_optimization(
     if simulate:
         # Simulates the QUA program for the specified duration
         simulation_config = SimulationConfig(duration=10_000)  # In clock cycles = 4ns
-        job = qmm.simulate(config, ro_duration_opt, simulation_config)
+        job = qmm.simulate(mc.config, ro_duration_opt, simulation_config)
         job.get_simulated_samples().con1.plot()
     else:
         # Open the quantum machine
-        qm = qmm.open_qm(config)
+        qm = qmm.open_qm(mc.config)
         # Send the QUA program to the OPX, which compiles and executes it
         job = qm.execute(ro_duration_opt)
         # Get results from QUA program

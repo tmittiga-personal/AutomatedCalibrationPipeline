@@ -20,9 +20,8 @@ Next steps before going to the next node:
 from qm.qua import *
 from qm import SimulationConfig
 from qm import QuantumMachinesManager
-from multiplexed_configuration import *
+from create_multiplexed_configuration import *
 from utils import *
-from qualang_tools.analysis.discriminator import two_state_discriminator_plot
 from qualang_tools.results.data_handler import DataHandler
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
@@ -39,7 +38,8 @@ def readout_amplitude_binary_search(
     resonator,
     n_runs = 10_000,
 ):
-    initial_amplitude = RR_CONSTANTS[resonator]["amplitude"]
+    mc = create_multiplexed_configuration()
+    initial_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]
 
     ###################
     # The QUA program #
@@ -47,10 +47,10 @@ def readout_amplitude_binary_search(
 
     IQ_blobs_data = {
         "n_runs": n_runs,
-        "resonator_LO": RL_CONSTANTS["rl1"]["LO"],
-        "readout_amp": RR_CONSTANTS[resonator]["amplitude"],
-        "qubit_LO": MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
-        "qubit_IF": QUBIT_CONSTANTS[qubit]["IF"],
+        "resonator_LO": mc.RL_CONSTANTS["rl1"]["LO"],
+        "readout_amp": mc.RR_CONSTANTS[resonator]["amplitude"],
+        "qubit_LO": mc.MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
+        "qubit_IF": mc.QUBIT_CONSTANTS[qubit]["IF"],
     }
 
     results_dict = {
@@ -89,7 +89,7 @@ def readout_amplitude_binary_search(
                     dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_g),
                 )
             # Wait for the qubit to decay to the ground state in the case of measurement induced transitions
-            wait(thermalization_time * u.ns, resonator)
+            wait(mc.thermalization_time * mc.u.ns, resonator)
             # Save the 'I' & 'Q' quadratures to their respective streams for the ground state
             save(I_g, I_g_st)
             save(Q_g, Q_g_st)
@@ -119,7 +119,7 @@ def readout_amplitude_binary_search(
                 )
 
             # Wait for the qubit to decay to the ground state
-            wait(thermalization_time * u.ns, resonator)
+            wait(mc.thermalization_time * mc.u.ns, resonator)
             # Save the 'I' & 'Q' quadratures to their respective streams for the excited state
             save(I_e, I_e_st)
             save(Q_e, Q_e_st)
@@ -134,17 +134,22 @@ def readout_amplitude_binary_search(
     #####################################
     #  Open Communication with the QOP  #
     #####################################
-    qmm = QuantumMachinesManager(host=qop_ip, port=qop_port, cluster_name=cluster_name, octave=octave_config)
+    qmm = QuantumMachinesManager(
+        host=mc.qop_ip, 
+        port=mc.qop_port, 
+        cluster_name=mc.cluster_name, 
+        octave=mc.octave_config
+    )
 
     #####################
     ### Binary Search ###
     #####################
 
-    config_copy = deepcopy(config)
+    config_copy = deepcopy(mc.config)
     iteration = 0
     amplitude_scale = 1
     still_testing = True
-    best_amplitude = RR_CONSTANTS[resonator]["amplitude"]
+    best_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]
     best_fidelity = 0
     best_iteration = 0
     # to ensure we don't ring around the optimum, decrease changes to the amplitude over time
@@ -154,7 +159,7 @@ def readout_amplitude_binary_search(
         # modify readout amplitude
         config_copy["waveforms"][f"readout_wf_{resonator}"]={
             "type": "constant", 
-            "sample": RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale
+            "sample": mc.RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale
         }
         # Open the quantum machine
         qm = qmm.open_qm(config_copy)
@@ -171,7 +176,7 @@ def readout_amplitude_binary_search(
         Qe = res_handles.get("Q_e").fetch_all()["value"]
         # Plot the IQ blobs, rotate them to get the separation along the 'I' quadrature, estimate a threshold between them
         # for state discrimination and derive the fidelity matrix
-        angle, threshold, fidelity, gg, ge, eg, ee, fig = two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=False, b_plot=True)
+        angle, threshold, fidelity, gg, ge, eg, ee, fig = two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=False)
 
         outlier_count_g, outliers_g, fig_g = cluster_deterimination(Ig, Qg)
         outlier_count_e, outliers_e, fig_e = cluster_deterimination(Ie, Qe)
@@ -194,11 +199,11 @@ def readout_amplitude_binary_search(
 
         results_dict[READOUT_TYPE][iteration] = {
             "fidelity": fidelity,
-            "angle": np.mod(angle + RR_CONSTANTS[resonator]["rotation_angle"], 2*np.pi),  # Update angle
+            "angle": np.mod(angle + mc.RR_CONSTANTS[resonator]["rotation_angle"], 2*np.pi),  # Update angle
             "threshold": threshold,
             'ground_outliers': outliers_g,
             'excited_outliers': outliers_e,
-            'amplitude': RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale,
+            'amplitude': mc.RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale,
         }
         plt.close()
         
@@ -207,7 +212,7 @@ def readout_amplitude_binary_search(
         too_many_outliers = outlier_count_e > 1 or outlier_count_g > 1
         
         if fidelity > best_fidelity and not too_many_outliers:
-            best_amplitude = RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale
+            best_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale
             best_fidelity = fidelity
             best_iteration = iteration
             print(f'Iteration {iteration}, New Best Amplitude: {best_amplitude}, Fidelity: {best_fidelity}')

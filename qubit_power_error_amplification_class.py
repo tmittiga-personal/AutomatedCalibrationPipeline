@@ -19,7 +19,7 @@ Next steps before going to the next node:
 from qm.qua import *
 from qm import QuantumMachinesManager
 from qm import SimulationConfig
-from multiplexed_configuration import *
+from create_multiplexed_configuration import *
 from utils import *
 from qualang_tools.results import progress_counter, fetching_tool
 from qualang_tools.plot import interrupt_on_close
@@ -37,11 +37,12 @@ class Power_error_amplification:
         qubit: str,
         parameter_name: str,
     ):
+        self.mc = create_multiplexed_configuration()
         self.qubit = qubit
-        self.resonator = qubit_resonator_correspondence[self.qubit]
+        self.resonator = self.mc.qubit_resonator_correspondence[self.qubit]
         self.parameter_name = parameter_name
-        self.amplitude = QUBIT_CONSTANTS[qubit][parameter_name+'amplitude']
-        self.amplitude_scaling = amplitude_scaling
+        self.amplitude = self.mc.QUBIT_CONSTANTS[qubit][parameter_name+'amplitude']
+        self.amplitude_scaling = self.mc.amplitude_scaling
         self.amplitude_sweep = np.array([])
         self.x_label = 'Pulse Amplitude [V]'
         self.y_label = 'Population'
@@ -78,16 +79,16 @@ class Power_error_amplification:
         power_rabi_error_amplification_data = {
             "qubit": self.qubit,
             "n_avg": n_avg,
-            "resonator_LO": RL_CONSTANTS["rl1"]["LO"],
-            "readout_amp": RR_CONSTANTS[qubit_resonator_correspondence[self.qubit]]["amplitude"],
-            "qubit_LO": MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
-            "qubit_IF": QUBIT_CONSTANTS[self.qubit]["IF"],
+            "resonator_LO": self.mc.RL_CONSTANTS["rl1"]["LO"],
+            "readout_amp": self.mc.RR_CONSTANTS[self.mc.qubit_resonator_correspondence[self.qubit]]["amplitude"],
+            "qubit_LO": self.mc.MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
+            "qubit_IF": self.mc.QUBIT_CONSTANTS[self.qubit]["IF"],
             self.parameter_name+"_amp": self.amplitude,
-            "amplitude_scaling": amplitude_scaling,
-            self.parameter_name+"_len": QUBIT_CONSTANTS[self.qubit][self.parameter_name+"len"],
+            "amplitude_scaling": self.mc.amplitude_scaling,
+            self.parameter_name+"_len": self.mc.QUBIT_CONSTANTS[self.qubit][self.parameter_name+"len"],
             "amplitudes": self.amplitude_sweep,
-            "qubit_octave_gain": qubit_octave_gain,
-            "resonator_octave_gain": resonator_octave_gain,
+            "qubit_octave_gain": self.mc.qubit_octave_gain,
+            "resonator_octave_gain": self.mc.resonator_octave_gain,
         }
 
         with program() as power_rabi_err:
@@ -116,7 +117,7 @@ class Power_error_amplification:
                         align(self.qubit, self.resonator)
                         # Measure the state of the resonator
                         # The integration weights have changed to maximize the SNR after having calibrated the IQ blobs.
-                        if RR_CONSTANTS[self.resonator]["use_opt_readout"]:
+                        if self.mc.RR_CONSTANTS[self.resonator]["use_opt_readout"]:
                             measure(
                                 f"readout",
                                 self.resonator,
@@ -133,7 +134,7 @@ class Power_error_amplification:
                                 dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q),
                             )
                         # Wait for the qubit to decay to the ground state
-                        wait(thermalization_time * u.ns, self.resonator)
+                        wait(self.mc.thermalization_time * self.mc.u.ns, self.resonator)
                         # Save the 'I' & 'Q' quadratures to their respective streams
                         save(I, I_st)
                         save(Q, Q_st)
@@ -149,7 +150,12 @@ class Power_error_amplification:
         #####################################
         #  Open Communication with the QOP  #
         #####################################
-        qmm = QuantumMachinesManager(host=qop_ip, port=qop_port, cluster_name=cluster_name, octave=octave_config)
+        qmm = QuantumMachinesManager(
+            host=self.mc.qop_ip, 
+            port=self.mc.qop_port, 
+            cluster_name=self.mc.cluster_name, 
+            octave=self.mc.octave_config
+        )
 
         ###########################
         # Run or Simulate Program #
@@ -158,12 +164,12 @@ class Power_error_amplification:
         if simulate:
             # Simulates the QUA program for the specified duration
             simulation_config = SimulationConfig(duration=10_000)  # In clock cycles = 4ns
-            job = qmm.simulate(config, power_rabi_err, simulation_config)
+            job = qmm.simulate(self.mc.config, power_rabi_err, simulation_config)
             job.get_simulated_samples().con1.plot()
 
         else:
             # Open the quantum machine
-            qm = qmm.open_qm(config)
+            qm = qmm.open_qm(self.mc.config)
             # Send the QUA program to the OPX, which compiles and executes it
             job = qm.execute(power_rabi_err)
             # Get results from QUA program
@@ -175,7 +181,8 @@ class Power_error_amplification:
                 # Fetch results
                 I, Q, iteration = results.fetch_all()
                 # Convert the results into Volts
-                I, Q = u.demod2volts(I, RR_CONSTANTS[self.resonator]["readout_length"]), u.demod2volts(Q, RR_CONSTANTS[self.resonator]["readout_length"])
+                I = self.mc.u.demod2volts(I, self.mc.RR_CONSTANTS[self.resonator]["readout_length"]) 
+                Q = self.mc.u.demod2volts(Q, self.mc.RR_CONSTANTS[self.resonator]["readout_length"])
                 # Progress bar
                 progress_counter(iteration, n_avg, start_time=results.get_start_time())
                 # Plot results
@@ -306,18 +313,23 @@ class Power_error_amplification:
             fitfunc = lambda x, *p, :  p[0]/( (1+ ((x-p[1])/p[2])**2)  ) + p[3]
 
         ymax, ymin = y.max(), y.min()
+        ydiff = np.abs(ymax-ymin)
+        xmin, xmax = x.min(), x.max()
         if self.is_negative_amplitude:
-            s = np.flatnonzero(y < (ymax + ymin)/2) # Find data points above middle y value. First and last points used to estimate width
+            s = np.flatnonzero(y < ymax - ydiff/2) # Find data points below middle y value. First and last points used to estimate width
             # Seed paramters: amplitude, center, width, background
-            p0 = [-1*(ymax-ymin), x[np.argmin(y)], np.abs(x[s[0]]- x[s[-1]]), ymax]
+            p0 = [-1*ydiff, x[np.argmin(y)], np.abs(x[s[0]]- x[s[-1]]), ymax]
+            bounds = ([-1*2*ydiff, xmin, 0, ymin-10*ydiff],
+                      [0, xmax, 10*(xmax-xmin), ymax+10*ydiff])
         else:
-            s = np.flatnonzero(y > (ymax + ymin)/2) # Find data points above middle y value. First and last points used to estimate width
+            s = np.flatnonzero(y > ydiff/2 + ymin) # Find data points above middle y value. First and last points used to estimate width
             # Seed paramters: amplitude, center, width, background
-            p0 = [(ymax-ymin), x[np.argmax(y)], np.abs(x[s[0]]- x[s[-1]]), ymin]
-
+            p0 = [ydiff, x[np.argmax(y)], np.abs(x[s[0]]- x[s[-1]]), ymin]
+            bounds = ([0, xmin, 0, ymin-10*ydiff],
+                      [2*ydiff, xmax, 10*(xmax-xmin), ymax+10*ydiff])
 
         # Fit
-        fit_params, covar = optimize.curve_fit(fitfunc, x,y, p0=p0) #, sigma=wd9e, bounds=([109,-1, 0, 0.5 ],[110,0, 1, 1.5 ]))
+        fit_params, covar = optimize.curve_fit(fitfunc, x,y, p0=p0, bounds=bounds)
         std_vec = np.sqrt(np.diag(covar))
 
         fig_peak = plt.figure()

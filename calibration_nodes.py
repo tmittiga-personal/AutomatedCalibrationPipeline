@@ -14,8 +14,7 @@ from readout_frequency_optimization import readout_frequency_optimization
 from readout_weights_optimization import readout_weights_optimization
 
 import importlib
-import multiplexed_configuration
-from multiplexed_configuration import *
+from create_multiplexed_configuration import *
 from utils import *
 
 DATAFRAME_FILE = "./calibration_database.pkl"
@@ -57,6 +56,7 @@ class Node:
     # Class variable shared by all instances, loaded from a file.
     # This way, we only have to load the dataframe once
     shared_dataframe: pd.DataFrame = pd.read_pickle(DATAFRAME_FILE)
+    multiplexed_config = create_multiplexed_configuration()
 
     def __init__(
         self,
@@ -166,7 +166,7 @@ class Node:
                 while i_attempt < MAX_ATTEMPTS and not self.calibration_success:
                     # If the last attempt (possibly by another qubit) overwrote these values
                     # we need to reset them
-                    self.calibration_value = self.calibration_value = np.nan
+                    self.calibration_value = np.nan
                     self.experiment_data_location = ''
 
                     try:
@@ -282,7 +282,7 @@ class Node:
             ]
             self.loaded_database.loc[len(self.loaded_database.index)] = new_row
         self.loaded_database.to_pickle(DATAFRAME_FILE)
-        self.reimport_multiplex_configuration()  # Until we update the config directly
+        # self.reimport_multiplex_configuration()  # Until we update the config directly
 
     
     def pull_latest_calibrated_values(
@@ -325,9 +325,10 @@ class Node:
         the configuration. Basically, it's necessary with the calibration pipeline, until I write another function that
         overwrites the configuration without re-importing.
         """
-        importlib.reload(multiplexed_configuration)
-        globals().update({k: getattr(multiplexed_configuration, k) 
-                          for k in dir(multiplexed_configuration) if not k.startswith('_')})
+        raise Exception('Currently, there should be no need for this.')
+        # importlib.reload(multiplexed_configuration)
+        # globals().update({k: getattr(multiplexed_configuration, k) 
+        #                   for k in dir(multiplexed_configuration) if not k.startswith('_')})
 
 
     def update_calibration_configuration(self):
@@ -359,7 +360,7 @@ class Node:
                 # Overwrite with new calbirated values
                 for param in UPDATEABLE_PARAMETER_NAMES:
                     if 'readout' in param:
-                        cal_dict['RR_CONSTANTS'][qubit_resonator_correspondence[qubit]][\
+                        cal_dict['RR_CONSTANTS'][Node.multiplexed_config.qubit_resonator_correspondence[qubit]][\
                             SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
                             database.loc[database.calibration_parameter_name == param][\
                             'calibration_value'].values[0]
@@ -463,7 +464,7 @@ class Qubit_Frequency_Node(Node):
         retry_time: float,
         fresh: bool = False,
         n_avg: int = 1000,
-        detuning: float = 2* u.MHz,  # in Hz
+        detuning: float = 2* Node.multiplexed_config.u.MHz,  # in Hz
         taus: np.typing.NDArray = DEFAULT_TAUS,
     ):
         super().__init__(
@@ -491,10 +492,9 @@ class Qubit_Frequency_Node(Node):
             detuning = self.detuning,
             taus = self.taus,
         )
-        fit_dict, data_folder = rvr.ramsey_w_virtual_rotation()
+        self.calibration_value, fit_dict, data_folder = rvr.ramsey_w_virtual_rotation()
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
-        self.calibration_value = QUBIT_CONSTANTS[self.current_qubit]["IF"] + fit_dict['qubit_detuning']
         self.success_condition(self.calibration_value, Q_FREQUENCY_CHANGE_THRESHOLD, False)
         return fit_dict
 
@@ -543,7 +543,7 @@ class Resonator_Amplitude_Node(Node):
 
         results_dict = readout_amplitude_binary_search(
             qubit = self.current_qubit,
-            resonator = qubit_resonator_correspondence[self.current_qubit]
+            resonator = Node.multiplexed_config.qubit_resonator_correspondence[self.current_qubit]
         )
         data_folder = results_dict['data_folder']
         fidelity = results_dict['rotated']['best']['fidelity']
@@ -591,7 +591,7 @@ class Resonator_Duration_Node(Node):
 
         opt_readout_length, data_folder = readout_duration_optimization(
             qubit = self.current_qubit,
-            resonator = qubit_resonator_correspondence[self.current_qubit]
+            resonator = Node.multiplexed_config.qubit_resonator_correspondence[self.current_qubit]
         )
         self.experiment_data_location = data_folder
         self.calibration_value = opt_readout_length
@@ -608,13 +608,12 @@ class Readout_Frequency_Node(Node):
         because the while loop terminates when it becomes True.
         """
 
-        fit_dict, data_folder = readout_frequency_optimization(
+        self.calibration_value, fit_dict, data_folder = readout_frequency_optimization(
             qubit = self.current_qubit,
-            resonator = qubit_resonator_correspondence[self.current_qubit]
+            resonator = Node.multiplexed_config.qubit_resonator_correspondence[self.current_qubit]
         )
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
-        self.calibration_value = fit_dict['fit_values']['center'] + RR_CONSTANTS[qubit_resonator_correspondence[self.current_qubit]]['IF']
         self.success_condition(self.calibration_value, RR_FREQUENCY_CHANGE_THRESHOLD, False)
         return fit_dict
     
@@ -636,7 +635,7 @@ class Readout_Weights_Node(Node):
 
         weights_dict, data_folder = readout_weights_optimization(            
             qubit = self.current_qubit,
-            resonator = qubit_resonator_correspondence[self.current_qubit]
+            resonator = Node.multiplexed_config.qubit_resonator_correspondence[self.current_qubit]
         )
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'weights_dict': weights_dict})
@@ -661,7 +660,7 @@ class IQ_Blobs_Node(Node):
 
         iq_blobs_dict = IQ_blobs_comparison(            
             qubit = self.current_qubit,
-            resonator = qubit_resonator_correspondence[self.current_qubit]
+            resonator = Node.multiplexed_config.qubit_resonator_correspondence[self.current_qubit]
         )
         
         if iq_blobs_dict['optimized']['fidelity'] > iq_blobs_dict['rotated']['fidelity']:
