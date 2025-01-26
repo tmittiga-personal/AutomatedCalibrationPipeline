@@ -225,7 +225,7 @@ class multiplexed_configuation_class:
                 "anharmonicity": -150 * u.MHz,
                 "drag_coefficient": 0.0,
                 "ac_stark_shift": 0.0 * u.MHz,
-                "IF": 0, #-492.2*u.MHz - shift_LO,
+                "IF": -492.2*u.MHz #- shift_LO,
             },
         }
         QUBIT_CONSTANTS = self.QUBIT_CONSTANTS
@@ -421,6 +421,18 @@ class multiplexed_configuation_class:
                 "midcircuit_ge_threshold": 0.0,
                 "use_opt_readout": False,
             },
+            # "q1_re": {
+            #     "amplitude": 0.005,
+            #     "readout_length": 8608,
+            #     "midcircuit_amplitude": 0.2511, 
+            #     "mc_readout_length": 3000,
+            #     "IF": 92264364.0,    
+            #     "rotation_angle": 4.305568e+00,
+            #     "ge_threshold": 1.1816289-4.717399e-05,
+            #     "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
+            #     "midcircuit_ge_threshold": 0.0,
+            #     "use_opt_readout": False,
+            # },
         }
         RR_CONSTANTS = self.RR_CONSTANTS
 

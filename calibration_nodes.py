@@ -12,6 +12,8 @@ from readout_amplitude_binary_search import readout_amplitude_binary_search
 from readout_duration_optimization import readout_duration_optimization
 from readout_frequency_optimization import readout_frequency_optimization
 from readout_weights_optimization import readout_weights_optimization
+from e_f_rabi_chevron_calibration import ef_rabi_chevron
+from parity_beating_calibration import parity_ramsey
 
 import importlib
 from create_multiplexed_configuration import *
@@ -497,6 +499,126 @@ class Qubit_Frequency_Node(Node):
         self.miscellaneous.update({'fit_dict': fit_dict})
         self.success_condition(self.calibration_value, Q_FREQUENCY_CHANGE_THRESHOLD, False)
         return fit_dict
+    
+
+
+class Parity_Beat_Node(Node):
+    """
+    Calibrate the frequency of qubit drive pulses.
+
+    TODO: Why didn't *arg work for pulling all of the parent class arguments? Debug this so we don't repeat the same
+    arguments from the parent class explicitly.
+    """
+    def __init__(
+        self,  
+        calibration_parameter_name: str,
+        qubits_to_calibrate: List[str],
+        refresh_time: float,
+        expiration_time: float,
+        retry_time: float,
+        fresh: bool = False,
+    ):
+        super().__init__(
+            calibration_parameter_name,
+            qubits_to_calibrate,
+            refresh_time,
+            expiration_time,
+            retry_time,
+            fresh,
+        )
+
+
+    def calibration_measurement(self):
+        """
+        NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
+        because the while loop terminates when it becomes True.
+        """
+
+        pr = parity_ramsey(
+            probe_qubit = self.current_qubit,
+        )
+        pr.run_parity_ramsey()
+
+        fit_dict = pr.fit_dict
+        parity_beat = np.abs(fit_dict['frequency1'] - fit_dict['frequency2'])
+        avg_freq = np.mean([fit_dict['frequency1'], fit_dict['frequency2']])
+        self.calibration_values = [avg_freq, parity_beat]
+        data_folder = pr.data_folder
+        self.experiment_data_location = data_folder
+        self.miscellaneous.update({'fit_dict': fit_dict})
+        self.success_condition(avg_freq, Q_FREQUENCY_CHANGE_THRESHOLD, False)
+        return fit_dict
+
+
+
+class EF_Rough_Amplitude_Frequency_Node(Node):
+    """
+    Calibrate the amplitude of qubit drive pulses.
+
+    Works for both pi and pi-half pulses.
+
+    TODO: Why didn't *arg work for pulling all of the parent class arguments? Debug this so we don't repeat the same
+    arguments from the parent class explicitly.
+    """
+    def __init__(
+        self, 
+        calibration_parameter_name: str,
+        qubits_to_calibrate: List[str],
+        refresh_time: float,
+        expiration_time: float,
+        retry_time: float,
+        fresh: bool = False,
+    ):
+        """
+        Initialize parameters for this class. The parent class arguments are the same.
+
+        :param pulse_parameter_name: determines the type of pulse, whose amplitude is being calibrated. eg pi_ or 
+        pi_half_
+        :param nb_pulse_step: This technique sweeps over an integer multiple number of nb_pulse_step number of pulses.
+        The measurement assumes all of the pulses amount to a total area being an integer multiple of 2pi. So if 
+        calibrating pi pulses, nb_pulse_step = 2. If calibrating pi-half, it's 4, etc.
+        :param a_min: Sets lower bound of the amplitude sweep to a fraction of the original amplitude.
+        :param a_max: Sets upper bound of the amplitude sweep to a fraction of the original amplitude.
+        """
+        #TODO: Don't repeat parent class arguments explicitly
+        super().__init__(
+            calibration_parameter_name,
+            qubits_to_calibrate,
+            refresh_time,
+            expiration_time,
+            retry_time,
+            fresh,
+        )
+
+
+    def calibration_measurement(self):
+        """
+        NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
+        because the while loop terminates when it becomes True.
+        """
+
+        fit_dict, pi_half_amp, data_folder = ef_rabi_chevron(self.current_qubit)
+        
+        self.experiment_data_location = data_folder
+        self.miscellaneous.update({'fit_dict': fit_dict})
+        pi_amplitude = fit_dict['amplitude']['amp_fit_values']['center']*fit_dict['scaled_original_amplitude']
+        pi_half_amplitude = pi_half_amp*fit_dict['scaled_original_amplitude']
+        qubit_IF = fit_dict['new_IF']
+        self.calibration_values = [pi_amplitude, pi_half_amplitude, qubit_IF]
+        self.success_conditions(self.calibration_values)
+        return fit_dict
+    
+
+    def success_conditions(
+            self, 
+            calibration_values,
+        ):
+        for value, threshold, rel_abs_bool, in zip(calibration_values, 
+            [AMPLITUDE_CHANGE_THRESHOLD, AMPLITUDE_CHANGE_THRESHOLD, Q_FREQUENCY_CHANGE_THRESHOLD],
+            [True, True, False]):
+            self.success_condition(value, threshold, rel_abs_bool)
+            if not self.calibration_success:
+                break
 
 
 

@@ -88,6 +88,11 @@ def readout_duration_optimization(
 
         with for_(n, 0, n < n_avg, n + 1):
             # Measure the ground state.
+            if resonator[-2:] == 're':
+                    # If this is a e-f qubit
+                    # State prep into e
+                    play("x180", qubit.replace('ef','xy'))
+                    align()
             # With demod.accumulated, the results are QUA vectors with 1 point for each accumulated chunk
             measure(
                 "readout",
@@ -111,6 +116,11 @@ def readout_duration_optimization(
 
             # Measure the excited state.
             # With demod.accumulated, the results are QUA vectors with 1 point for each accumulated chunk
+            if resonator[-2:] == 're':
+                    # If this is a e-f qubit
+                    # State prep into e
+                    play("x180", qubit.replace('ef','xy'))
+                    align()
             play("x180", qubit)
             align(qubit, resonator)
             measure(

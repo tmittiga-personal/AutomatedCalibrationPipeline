@@ -124,9 +124,16 @@ def readout_frequency_optimization(
 
         with for_(n, 0, n < n_avg, n + 1):
             with for_(*from_array(df, dfs)):
+                align()
                 # Update the frequency of the digital oscillator linked to the resonator element
                 update_frequency(resonator, df + mc.RR_CONSTANTS[resonator]['IF'])
                 # Measure the state of the resonator
+                if resonator[-2:] == 're':
+                    # If this is a e-f qubit
+                    # State prep into e
+                    play("x180", qubit.replace('ef','xy'))
+                    align()
+
                 if mc.RR_CONSTANTS[resonator]["use_opt_readout"]:
                     measure(
                         "readout",
@@ -150,6 +157,11 @@ def readout_frequency_optimization(
                 save(Q_g, Qg_st)
 
                 align()  # global align
+                if resonator[-2:] == 're':
+                    # If this is a e-f qubit
+                    # State prep into e
+                    play("x180", qubit.replace('ef','xy'))
+                    align()
                 # Play the x180 gate to put the qubit in the excited state
                 play("x180", qubit)
                 # Align the two elements to measure after playing the qubit pulse.

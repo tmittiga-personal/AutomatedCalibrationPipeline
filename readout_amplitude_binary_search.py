@@ -71,6 +71,11 @@ def readout_amplitude_binary_search(
         Q_e_st = declare_stream()
 
         with for_(n, 0, n < n_runs, n + 1):
+            if resonator[-2:] == 're':
+                # If this is a e-f qubit
+                # State prep into e
+                play("x180", qubit.replace('ef','xy'))
+                align()
 
             if OPTIMIZED_READOUT:
                 measure(
@@ -97,6 +102,11 @@ def readout_amplitude_binary_search(
             align()  # global align
             # Play the x180 gate to put the qubit in the excited state
 
+            if resonator[-2:] == 're':
+                # If this is a e-f qubit
+                # State prep into e
+                play("x180", qubit.replace('ef','xy'))
+                align()
             play("x180", qubit)
             # Align the two elements to measure after playing the qubit pulse.
             align(qubit, resonator)
