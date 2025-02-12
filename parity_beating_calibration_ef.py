@@ -40,14 +40,14 @@ class parity_ramsey:
         self.probe_qubit = probe_qubit
         self.filename_qubits = ''
         self.filename_qubits += self.probe_qubit +'_'
-        self.f_artificial = 0.2 * self.mc.u.MHz #0.1
+        self.f_artificial = 0.0 * self.mc.u.MHz #0.1
         self.n_avg_per_job = 30  # The number of averages taken for a single job
         self.n_rounds = 7  # The number of rounds to repeat each chunk of the program
         self.program_divisions = 10  # the number of chunks to divide the program into
         # Pulse duration sweep (in clock cycles = 4ns) - must be larger than 4 clock cycles
         # taus = np.arange(tau_min, tau_max + 0.1, d_tau)  # + 0.1 to add tau_max to taus
         # self.taus = np.arange(4, 301240//4 , (1240)//2)
-        self.taus = np.arange(4, 51240//4 , (1000)//4)
+        self.taus = np.arange(4, 21240//4 , (200)//4)
 
 
         
@@ -157,36 +157,51 @@ class parity_ramsey:
 
                 with for_(n, 0, n < self.n_avg_per_job, n + 1):        
                     for t in self.tau_arrays[i_i]:  
+                        assign(final_phase, Cast.mul_fixed_by_int(self.f_artificial * 1e-9, 4 * t))
+                        
                         ##################
                         ### Individual ###
                         ##################
-                        with strict_timing_():           
-                            align()                                   
-                            
-                            # create superposition for T2* measurement
-                            if resonator[-2:] == 're':
-                                # If this is a e-f qubit
-                                # State prep into e
-                                play("x180", probe_qubit.replace('ef','xy'))
-                                align()
-                            play("x90", probe_qubit)
+                        for i_case in range(2):
+                            # Loop between T1 and T2* measurements.
+                            # we're interested in T1 of |e> so we only have to wait for T1. No Pulses after state prep to |e>
+                            with strict_timing_():           
+                                align()                                   
+                                
+                                # create superposition for T2* measurement
+                                if resonator[-2:] == 're':
+                                    # If this is a e-f qubit
+                                    # State prep into e
+                                    play("x180", probe_qubit.replace('ef','xy'))
+                                    align()
+                                match i_case:
+                                    case 1:
+                                        # create superposition for T2* measurement
+                                        play("x90", probe_qubit)
 
-                            wait(t, probe_qubit)
-                            play(f'xvar{t}', probe_qubit)
-                            align()
-                        
-                            measure(
-                                "readout",
-                                resonator,
-                                None,
-                                dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_cases),
-                                dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_cases),
-                            )
-                            # Save the 'I_e' & 'Q_e' quadratures to their respective streams
-                            assign(I_thresholded, Util.cond(I_cases>self.threshold, 1, 0))
-                            save(I_thresholded, I_thresholded_st)
-                            save(I_cases, I_st)
-                            save(Q_cases, Q_st)
+
+                                wait(t, probe_qubit)
+                                match i_case:
+                                    case 1:
+                                        # Project the T2* measurement
+                                        # play(f'xvar{t}', probe_qubit)
+                                        frame_rotation_2pi(final_phase, probe_qubit)
+                                        play("x90", probe_qubit)
+                                        reset_frame(probe_qubit)
+                                align()
+
+                                measure(
+                                    "readout",
+                                    resonator,
+                                    None,
+                                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_cases),
+                                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_cases),
+                                )       
+                                # Save the 'I_e' & 'Q_e' quadratures to their respective streams
+                                assign(I_thresholded, Util.cond(I_cases>self.threshold, 1, 0))
+                                save(I_thresholded, I_thresholded_st)
+                                save(I_cases, I_st)
+                                save(Q_cases, Q_st)
                         # Wait for the qubit to decay to the ground state
                         wait(self.mc.thermalization_time * self.mc.u.ns, resonator)
                     # Save the averaging iteration to get the progress bar
@@ -197,9 +212,9 @@ class parity_ramsey:
                     # If log sweep, then the swept values will be slightly different from np.logspace because of integer rounding in QUA.
                     # get_equivalent_log_array() is used to get the exact values used in the QUA program.
                     
-                    I_thresholded_st.buffer(len(self.tau_arrays[i_i])).average().save(f"I_thresholded")
-                    I_st.buffer(len(self.tau_arrays[i_i])).average().save(f"I")
-                    Q_st.buffer(len(self.tau_arrays[i_i])).average().save(f"Q")
+                    I_thresholded_st.buffer(2).buffer(len(self.tau_arrays[i_i])).average().save(f"I_thresholded")
+                    I_st.buffer(2).buffer(len(self.tau_arrays[i_i])).average().save(f"I")
+                    Q_st.buffer(2).buffer(len(self.tau_arrays[i_i])).average().save(f"Q")
                     n_st.save("iteration") #"""
             # exec(program_code)
             # eval(f'programs.append(multiplex_ramsey_{i_i})')
@@ -259,17 +274,23 @@ class parity_ramsey:
                 # results = fetching_tool(job, data_list=fetch_names)
                 progress_counter(n_jobs, self.program_divisions*self.n_rounds, start_time=start_time)                
                 P = job.result_handles.I_thresholded.fetch_all()
+                P = P.transpose()
                 I = job.result_handles.I.fetch_all()
-                Q = job.result_handles.Q.fetch_all()
+                I = I.transpose()
+                Q = job.result_handles.Q.fetch_all()         
+                Q = Q.transpose()
 
                 self.program_data_dict[job.id] = {resonator: {}}
                     
                 self.program_data_dict[job.id][resonator].update(
                     {
                         'taus':self.tau_arrays[i_pj],
-                        'P_T2star': P,
-                        'I_T2star': I,
-                        'Q_T2star': Q,
+                        'P_T1': P[0],
+                        'I_T1': I[0],
+                        'Q_T1': Q[0],
+                        'P_T2star': P[1],
+                        'I_T2star': I[1],
+                        'Q_T2star': Q[1],
                     }
                 )
                 n_jobs += 1
@@ -278,6 +299,9 @@ class parity_ramsey:
         P_T2star = np.zeros(len(self.taus))
         I_T2star = np.zeros(len(self.taus))
         Q_T2star = np.zeros(len(self.taus))
+        P_T1 = np.zeros(len(self.taus))
+        I_T1 = np.zeros(len(self.taus))
+        Q_T1 = np.zeros(len(self.taus))
         last_index = 0
         n_pd = self.program_divisions
         for i_pd in range(n_pd):
@@ -286,19 +310,30 @@ class parity_ramsey:
                     temp_P = self.program_data_dict[str(first_job_id+i_pd)][resonator]['P_T2star']
                     temp_I = self.program_data_dict[str(first_job_id+i_pd)][resonator]['I_T2star']
                     temp_Q = self.program_data_dict[str(first_job_id+i_pd)][resonator]['Q_T2star']
+                    temp_P1 = self.program_data_dict[str(first_job_id+i_pd)][resonator]['P_T1']
+                    temp_I1 = self.program_data_dict[str(first_job_id+i_pd)][resonator]['I_T1']
+                    temp_Q1 = self.program_data_dict[str(first_job_id+i_pd)][resonator]['Q_T1']
                     program_length = len(temp_P)
                 else:
                     temp_P += self.program_data_dict[str(first_job_id+n_pd*i_r+i_pd)][resonator]['P_T2star']
                     temp_I += self.program_data_dict[str(first_job_id+n_pd*i_r+i_pd)][resonator]['I_T2star']
                     temp_Q += self.program_data_dict[str(first_job_id+n_pd*i_r+i_pd)][resonator]['Q_T2star']
+                    temp_P1 += self.program_data_dict[str(first_job_id+n_pd*i_r+i_pd)][resonator]['P_T1']
+                    temp_I1 += self.program_data_dict[str(first_job_id+n_pd*i_r+i_pd)][resonator]['I_T1']
+                    temp_Q1 += self.program_data_dict[str(first_job_id+n_pd*i_r+i_pd)][resonator]['Q_T1']
             P_T2star[last_index: last_index+program_length] = np.array(temp_P)/self.n_rounds
             I_T2star[last_index: last_index+program_length] = np.array(temp_I)/self.n_rounds
             Q_T2star[last_index: last_index+program_length] = np.array(temp_Q)/self.n_rounds
+            P_T1[last_index: last_index+program_length] = np.array(temp_P1)/self.n_rounds
+            I_T1[last_index: last_index+program_length] = np.array(temp_I1)/self.n_rounds
+            Q_T1[last_index: last_index+program_length] = np.array(temp_Q1)/self.n_rounds
             last_index += program_length
             
 
             cis = wilson_score_interval(P_T2star, self.n_avg_per_job*self.n_rounds, z=1)
             P_T2star_err = errorbars_from_intervals(P_T2star, cis)
+            cis = wilson_score_interval(P_T1, self.n_avg_per_job*self.n_rounds, z=1)
+            P_T1_err = errorbars_from_intervals(P_T1, cis)
 
             self.data_dict[resonator].update(
                 {
@@ -306,6 +341,10 @@ class parity_ramsey:
                     'P_T2star_err': P_T2star_err,
                     'I_T2star': I_T2star,
                     'Q_T2star': Q_T2star,
+                    'P_T1': P_T1,
+                    'P_T1_err': P_T1_err,
+                    'I_T1': I_T1,
+                    'Q_T1': Q_T1,
                 }
             )
 

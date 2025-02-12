@@ -193,6 +193,17 @@ QUBIT_CONSTANTS = {
         "ac_stark_shift": 0.0 * u.MHz,
         "IF": 0, #-492.2*u.MHz - shift_LO,
     },
+    'q3_ef': {
+        "pi_amplitude": 0.23,
+        "pi_half_amplitude": 0.25/2,
+        "pi_len": 100,
+        "pi_half_len": 100,
+        "pi_sigma": 100/5, 
+        "anharmonicity": -150 * u.MHz,
+        "drag_coefficient": 0.0,
+        "ac_stark_shift": 0.0 * u.MHz,
+        "IF": -132.248*u.MHz #- shift_LO,
+    },
 }
 if use_calibrated_values:
     for qubit_key, constants in zip(CALIBRATION_QUBITS, QUBIT_CONSTANTS.values()):

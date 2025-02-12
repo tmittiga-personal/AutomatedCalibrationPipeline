@@ -257,3 +257,9 @@ def readout_duration_optimization(
         plt.close()
 
         return opt_readout_length, data_folder
+
+if __name__ == "__main__":
+    readout_duration_optimization(
+        qubit='q3_ef',
+        resonator='q3_re',
+    )

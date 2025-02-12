@@ -25,15 +25,18 @@ from qualang_tools.loops import from_array
 import matplotlib.pyplot as plt
 from qualang_tools.results.data_handler import DataHandler
 from scipy import optimize
+import peakutils
+
+
+NUM_PARAMS = 4  # Each peak has 4 parameters
 
 
 def peak_fit(
     x,
     y,
-    fitname='gaussian',
 ):
     """
-    Fits a gaussian or lorentzian to 1D data cropped to a window.
+    Fits gaussians to 1D data cropped to a window.
 
     :param x: the x-axis array
     :param y: the y-axis data
@@ -46,24 +49,73 @@ def peak_fit(
 
     :return: figure of the fit, fit_params array, and fit parameter uncertainty array
     """
-    assert fitname in ['gaussian', 'lorentzian'], f"{fitname=} not in  ['gaussian', 'lorentzian']"
 
-    # Grab data just within the window
 
-    if fitname == 'gaussian':
-        fitfunc = lambda x, *p, :  p[0]*np.exp(-( ( (x-p[1])/p[2] )**2 )/2) + p[3]
-    else:
-        fitfunc = lambda x, *p, :  p[0]/( (1+ ((x-p[1])/p[2])**2)  ) + p[3]
+    fitfunc1 = lambda x, *p, :  p[0]*np.exp(-( ( (x-p[1])/p[2] )**2 )/2) + p[3]
 
+    try:
+        indexes = peakutils.indexes(y, thres=np.std(y/np.max(y)), min_dist=1)
+        peak_amps = y[indexes]
+        strongest_freqs = x[indexes]
+
+    except:
+        print('multiple peaks not detected')
+        peak_ind = np.argpartition(y, -2)[-2:]
+        strongest_freqs = x[peak_ind]            
+        peak_amps = y[peak_ind]
+    
     ymax, ymin = y.max(), y.min()
     s = np.flatnonzero(y > (ymax + ymin)/2) # Find data points above middle y value. First and last points used to estimate width
-    # Seed paramters: amplitude, center, width, background
-    p0 = [(ymax-ymin), x[np.argmax(y)], np.abs(x[s[0]]- x[s[-1]]), ymin]
+            
+    best_fit_resq = 1e10
+    best_with_multi = False
+    for try_with_multi in [True, False]:
+        if try_with_multi:
+            def sum_of_peaks(x, *params):
+                """
+                Compute the sum of an arbitrary number of Gaussian functions.
+                """
+                result = np.zeros_like(x)
+                num_gaussians = len(params) // NUM_PARAMS
+
+                for i in range(num_gaussians):
+                    p = params[i*NUM_PARAMS:(i+1)*NUM_PARAMS]
+                    result += fitfunc1(x, *p)
+    
+                return result
+
+            num_peaks = len(peak_amps)
+            p0 = np.array([
+                [peak_amps[i], strongest_freqs[i], np.abs(x[s[0]]- x[s[-1]])/num_peaks, ymin/num_peaks]
+                for i in range(num_peaks)
+            ]).flatten()
+            # Fit
+            try:
+                fit_paramsT, covar, infodict, mesg, ier = optimize.curve_fit(sum_of_peaks, x,y, p0=p0, full_output= True )
+                sum_resq = np.sum(np.array(infodict['fvec'])**2)
+                if sum_resq < best_fit_resq:
+                    fit_params = fit_paramsT
+                    std_vec = np.sqrt(np.diag(covar))
+                    best_fit_resq = sum_resq
+                    best_with_multi = True
+                    fitfunc = sum_of_peaks
+            except:
+                pass # hope the single peak works
+        else:
+
+            # Seed paramters: amplitude, center, width, background
+            p0 = [(ymax-ymin), x[np.argmax(y)], np.abs(x[s[0]]- x[s[-1]]), ymin]
 
 
-    # Fit
-    fit_params, covar = optimize.curve_fit(fitfunc, x,y, p0=p0) #, sigma=wd9e, bounds=([109,-1, 0, 0.5 ],[110,0, 1, 1.5 ]))
-    std_vec = np.sqrt(np.diag(covar))
+            # Fit
+            fit_paramsT, covar, infodict, mesg, ier = optimize.curve_fit(fitfunc1, x,y, p0=p0, full_output= True )
+            sum_resq = np.sum(np.array(infodict['fvec'])**2)
+            if sum_resq < best_fit_resq:
+                fit_params = fit_paramsT
+                std_vec = np.sqrt(np.diag(covar))
+                best_fit_resq = sum_resq
+                best_with_multi = False
+                fitfunc = fitfunc1
 
     fig_peak = plt.figure()
     plt.errorbar(x,y, color=(0, 0, 1), ls='none', #yerr=wd9e,
@@ -76,7 +128,7 @@ def peak_fit(
     plt.ylabel("SNR")
     plt.legend()
     plt.title(f'Location Fit: {round(fit_params[1],5)} +- {round(std_vec[1],5)}')
-    return fig_peak, fit_params, std_vec
+    return fig_peak, fit_params, std_vec, best_with_multi
 
 
 def readout_frequency_optimization(
@@ -272,25 +324,47 @@ def readout_frequency_optimization(
         ro_freq_opt_data["figure"] = fig
         plt.close()
         
-        fig_peak, fit_params, std_vec = peak_fit(
+        fig_peak, fit_params, std_vec, best_with_multi = peak_fit(
             x = dfs,
             y = SNR,
         )
 
-        fit_dict = {
-            'fit_values': {
-                'peak_amplitude': fit_params[0],
-                'center': fit_params[1],
-                'width': fit_params[2],
-                'background': fit_params[3],
-            },
-            'fit_uncertainties':{
-                'peak_amplitude': std_vec[0],
-                'center': std_vec[1],
-                'width': std_vec[2],
-                'background': std_vec[3],
-            },
-        }
+        if best_with_multi:
+            num_gaussians = len(fit_params) // NUM_PARAMS
+            highest_amp = 0
+            best_freq = 0
+            fit_dict = {'fit_values': {}, 'fit_uncertainties':{}}
+
+            for i in range(num_gaussians):
+                p = fit_params[i*NUM_PARAMS:(i+1)*NUM_PARAMS]
+                s = std_vec[i*NUM_PARAMS:(i+1)*NUM_PARAMS]
+                fit_dict['fit_values'][f'peak_amplitude{i}'] = p[0]
+                fit_dict['fit_values'][f'center{i}'] = p[1]
+                fit_dict['fit_values'][f'width{i}'] = p[2]
+                fit_dict['fit_values'][f'background{i}'] = p[2]
+                fit_dict['fit_uncertainties'][f'peak_amplitude{i}'] = s[0]
+                fit_dict['fit_uncertainties'][f'center{i}'] = s[1]
+                fit_dict['fit_uncertainties'][f'width{i}'] = s[2]
+                fit_dict['fit_uncertainties'][f'background{i}'] = s[2]
+                if p[0] > highest_amp:
+                    best_freq = p[1]
+        else:
+
+            fit_dict = {
+                'fit_values': {
+                    'peak_amplitude': fit_params[0],
+                    'center': fit_params[1],
+                    'width': fit_params[2],
+                    'background': fit_params[3],
+                },
+                'fit_uncertainties':{
+                    'peak_amplitude': std_vec[0],
+                    'center': std_vec[1],
+                    'width': std_vec[2],
+                    'background': std_vec[3],
+                },
+            }
+            best_freq = fit_dict['fit_values']['center']
         ro_freq_opt_data["base_frequency"] = mc.RR_CONSTANTS[resonator]['IF']
         ro_freq_opt_data["Ig_avg"] = Ig_avg
         ro_freq_opt_data["Qg_avg"] = Qg_avg
@@ -307,5 +381,15 @@ def readout_frequency_optimization(
         data_folder = data_handler.save_data(ro_freq_opt_data, name=f"{resonator}_ro_freq_opt")
 
         plt.close()
-        cal_val = mc.RR_CONSTANTS[mc.qubit_resonator_correspondence[qubit]]['IF'] + fit_dict['fit_values']['center']
+        cal_val = mc.RR_CONSTANTS[mc.qubit_resonator_correspondence[qubit]]['IF'] + best_freq
         return cal_val, fit_dict, data_folder
+    
+
+
+if __name__ == "__main__":
+    cal_val, fit_dict, data_folder = readout_frequency_optimization(
+        qubit='q3_ef',
+        resonator='q3_re',
+    )
+    print(f'{cal_val=}')
+    print(f'{fit_dict=}')

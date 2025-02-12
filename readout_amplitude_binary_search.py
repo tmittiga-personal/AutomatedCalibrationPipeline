@@ -36,10 +36,24 @@ MAX_ITERATIONS = 10
 def readout_amplitude_binary_search(
     qubit,
     resonator,
+    i_attempt,
     n_runs = 10_000,
 ):
     mc = create_multiplexed_configuration()
     initial_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]
+    if i_attempt > 0: # and qubit[-2:]=='ef':
+        df = pull_latest_n_calibrated_values(
+            qubits = [qubit],
+            search_parameter_names = ['readout_amplitude'],
+            n_latest = i_attempt,
+            all_attempts = True,
+        )
+        # Loop over this round of attempts to calbirate and take an improved values
+        for ii in range(i_attempt):
+            if df['miscellaneous'].iloc[-1*(ii+1)]['results_dict']['improved']:
+                initial_amplitude = df['calibration_value'].iloc[-1*(ii+1)]
+                break
+
 
     ###################
     # The QUA program #
@@ -48,9 +62,11 @@ def readout_amplitude_binary_search(
     IQ_blobs_data = {
         "n_runs": n_runs,
         "resonator_LO": mc.RL_CONSTANTS["rl1"]["LO"],
-        "readout_amp": mc.RR_CONSTANTS[resonator]["amplitude"],
+        "readout_amp": initial_amplitude,
         "qubit_LO": mc.MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
         "qubit_IF": mc.QUBIT_CONSTANTS[qubit]["IF"],
+        "ge_threshold": mc.RR_CONSTANTS[resonator]["ge_threshold"],
+        "rotation_angle": mc.RR_CONSTANTS[resonator]["rotation_angle"]
     }
 
     results_dict = {
@@ -159,8 +175,10 @@ def readout_amplitude_binary_search(
     iteration = 0
     amplitude_scale = 1
     still_testing = True
-    best_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]
+    best_amplitude = initial_amplitude
     best_fidelity = 0
+    first_valid_fidelity = 0
+    first_valid_iteration = 0
     best_iteration = 0
     # to ensure we don't ring around the optimum, decrease changes to the amplitude over time
     ring_down = np.exp(-np.array(range(0,MAX_ITERATIONS))/(MAX_ITERATIONS/5))
@@ -169,7 +187,7 @@ def readout_amplitude_binary_search(
         # modify readout amplitude
         config_copy["waveforms"][f"readout_wf_{resonator}"]={
             "type": "constant", 
-            "sample": mc.RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale
+            "sample": initial_amplitude*amplitude_scale
         }
         # Open the quantum machine
         qm = qmm.open_qm(config_copy)
@@ -213,7 +231,7 @@ def readout_amplitude_binary_search(
             "threshold": threshold,
             'ground_outliers': outliers_g,
             'excited_outliers': outliers_e,
-            'amplitude': mc.RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale,
+            'amplitude': initial_amplitude*amplitude_scale,
         }
         plt.close()
         
@@ -222,9 +240,13 @@ def readout_amplitude_binary_search(
         too_many_outliers = outlier_count_e > 1 or outlier_count_g > 1
         
         if fidelity > best_fidelity and not too_many_outliers:
-            best_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]*amplitude_scale
+            best_amplitude = initial_amplitude*amplitude_scale
             best_fidelity = fidelity
             best_iteration = iteration
+
+            if first_valid_fidelity == 0:
+                first_valid_fidelity = fidelity
+                first_valid_iteration = iteration
             print(f'Iteration {iteration}, New Best Amplitude: {best_amplitude}, Fidelity: {best_fidelity}')
 
         if high_enough_fidelity and not too_many_outliers:
@@ -241,7 +263,14 @@ def readout_amplitude_binary_search(
         
 
         iteration += 1
+    # Check for improvement 
+    improved = False
+    if first_valid_iteration > 0 or best_fidelity > first_valid_fidelity:
+        # Wend from an amplitude that produced too many outliers, to a valid amplitude        
+        # Or went from a valid amplitude to a better amplitude
+        improved = True
     results_dict[READOUT_TYPE]['best'] = results_dict[READOUT_TYPE][best_iteration]
+    results_dict['improved'] = improved
     data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_resonator_amplitude_binary_search")
     results_dict['data_folder'] = data_folder
     return results_dict
@@ -326,6 +355,6 @@ def cluster_deterimination(
 
 if __name__ == "__main__":
     readout_amplitude_binary_search(
-        'q3_xy',
-        'q3_rr',
+        'q3_ef',
+        'q3_re',
     )

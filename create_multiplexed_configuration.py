@@ -1,12 +1,12 @@
 from pathlib import Path
 import numpy as np
-from qualang_tools.config.waveform_tools import drag_gaussian_pulse_waveforms
+from qualang_tools.config.waveform_tools import drag_gaussian_pulse_waveforms, flattop_gaussian_waveform
 from qualang_tools.units import unit
 from set_octave import OctaveUnit, octave_declaration
 from utils import *
 
-ALL_QUBIT_NAMES = ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy"]
-CALIBRATION_QUBITS = ["q1_xy","q3_xy","q5_xy"]
+ALL_QUBIT_NAMES = ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy", 'q3_ef']
+CALIBRATION_QUBITS = ["q1_xy","q3_xy","q5_xy", "q3_ef"]
 # True to overwrite values with automated calbiration values
 # False to use values as written in this file
 class multiplexed_configuation_class:
@@ -32,26 +32,30 @@ class multiplexed_configuation_class:
                 search_parameter_names=UPDATEABLE_PARAMETER_NAMES,
             )
         OVERRIDE_QUBIT_CONSTANTS = {
-            "q1_xy": {
-                # "IF": -3.413e+08	-95000	,
-                # 'pi_half_amplitude': 0.074,
+            "q3_ef": {
+                # 'pi_amplitude': 0.11567684880138443,
+                # # "IF": -132853370.0,
+                # 'pi_half_amplitude': 0.05763013231970283,
             },   
-            # "q3_xy": {
-            #     "IF": 3.115e7	,
-            # }, 
+            "q3_xy": {
+                # "pi_amplitude": 0.15142390913034726,
+                # 'pi_half_amplitude': 0.0744701522625286,
+            }, 
             # "q5_xy": {
             #     "pi_half_amplitude": 0.0565,
             #     "IF": 1.4188e+08 ,
             # },
         }
         OVERRIDE_RR_CONSTANTS = {
-            # "q1_rr": {
-                # "amplitude": 0.0096,
-            #     "IF": 92.25*1e6
-            # },
-            # "q3_rr": {
-            #     "IF": 1.5685*1e8
-            # },
+            "q3_rr": {
+                # "amplitude": 0.006926810565831467,
+                # "IF": 92.25*1e6
+            },
+            "q3_re": {
+                # "amplitude": 0.0020826678827023694,
+                # "IF": 1.5658*1e8,
+                # 'readout_threshold': -0.003,
+            },
             # "q5_rr": {
             #     "IF": 2.111 * 1e8
             # }
@@ -131,14 +135,14 @@ class multiplexed_configuation_class:
         self.PI_SIGMA = PI_LENGTH / 5
         PI_SIGMA = self.PI_SIGMA
 
-        self.qubit_octave_gain = 6
+        self.qubit_octave_gain = 2 #6 before 2/11/2025 11:45am
         qubit_octave_gain = self.qubit_octave_gain
-        self.amplitude_scaling = 0.5
+        self.amplitude_scaling = 1.5 #0.5 before 2/11/2025 11:45am
         amplitude_scaling = self.amplitude_scaling
 
         self.MULTIPLEX_DRIVE_CONSTANTS = {
             "drive1": {
-                "QUBITS": ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy", "q1_ef"],
+                "QUBITS": ["q1_xy", "q2_xy", "q3_xy", "q4_xy", "q5_xy", "q6_xy", "q3_ef"], #"q1_ef",
                 "LO": qubit_LO + shift_LO,
                 "con": "con1",
                 "octave": "octave1",
@@ -151,15 +155,15 @@ class multiplexed_configuation_class:
         # Constants for each qubit (replace example values with actual values)
         self.QUBIT_CONSTANTS = {
             ALL_QUBIT_NAMES[0]: {
-                "pi_amplitude": 0.3017, 
-                "pi_half_amplitude": 0.3017/2,
+                "pi_amplitude": 0.29978575803912894*0.5, 
+                "pi_half_amplitude": 0.14999084858768644*0.5,
                 "pi_len": 160,
                 "pi_half_len": 160,
                 "pi_sigma": 160/5,
                 "anharmonicity": -200 * u.MHz,
                 "drag_coefficient": 0.0,
                 "ac_stark_shift": 0.0 * u.MHz,
-                "IF": -341403900 - shift_LO,
+                "IF": -341399225.8587864 - shift_LO,
             },
             ALL_QUBIT_NAMES[1]: {
                 "pi_amplitude": 0.0414,
@@ -173,15 +177,15 @@ class multiplexed_configuation_class:
                 "IF": -88 * u.MHz - shift_LO,
             },
             ALL_QUBIT_NAMES[2]: {
-                "pi_amplitude": 0.289,
-                "pi_half_amplitude": 0.289/2,
+                "pi_amplitude": 0.28540615553352305*0.5,
+                "pi_half_amplitude": 0.14193227772154002*0.5,
                 "pi_len": PI_LENGTH,
                 "pi_half_len": PI_LENGTH,
                 "pi_sigma": PI_SIGMA, 
                 "anharmonicity": -190 * u.MHz,
                 "drag_coefficient": 0.0,
                 "ac_stark_shift": 0.0 * u.MHz,
-                "IF": 31.14558 * u.MHz + 0.01 * u.MHz - shift_LO,
+                "IF": 31151373.50504553 - shift_LO,
             },
             ALL_QUBIT_NAMES[3]: {
                 "pi_amplitude": 0.0944/3,
@@ -195,15 +199,15 @@ class multiplexed_configuation_class:
                 "IF": -31 * u.MHz - shift_LO,
             },
             ALL_QUBIT_NAMES[4]: {
-                "pi_amplitude": 0.2273,
-                "pi_half_amplitude": 0.2273/2,
+                "pi_amplitude": 0.22673353856292972*0.5,
+                "pi_half_amplitude": 0.11299435404488586*0.5,
                 "pi_len": PI_LENGTH,
                 "pi_half_len": PI_LENGTH,
                 "pi_sigma": PI_SIGMA, 
                 "anharmonicity": -150 * u.MHz,
                 "drag_coefficient": 0.0,
                 "ac_stark_shift": 0.0 * u.MHz,
-                "IF": 141.9014 * u.MHz - shift_LO,
+                "IF": 141898460.7925754 - shift_LO,
             },
             ALL_QUBIT_NAMES[5]: {
                 "pi_amplitude": 0.1797,
@@ -216,16 +220,27 @@ class multiplexed_configuation_class:
                 "ac_stark_shift": 0.0 * u.MHz,
                 "IF": 322.30683 * u.MHz -78*u.kHz - shift_LO,
             },
-            'q1_ef': {
-                "pi_amplitude": 0.23,
-                "pi_half_amplitude": 0.25/2,
-                "pi_len": 160,
-                "pi_half_len": 160,
-                "pi_sigma": 160/5, 
+            # 'q1_ef': {
+            #     "pi_amplitude": 0.23,
+            #     "pi_half_amplitude": 0.25/2,
+            #     "pi_len": 160,
+            #     "pi_half_len": 160,
+            #     "pi_sigma": 160/5, 
+            #     "anharmonicity": -150 * u.MHz,
+            #     "drag_coefficient": 0.0,
+            #     "ac_stark_shift": 0.0 * u.MHz,
+            #     "IF": -492.2*u.MHz #- shift_LO,
+            # },
+            'q3_ef': {
+                "pi_amplitude": 0.47966566761725354*0.438965,
+                "pi_half_amplitude": 0.29406105156882456*0.438965,
+                "pi_len": 100,
+                "pi_half_len": 100,
+                "pi_sigma": 100/5, 
                 "anharmonicity": -150 * u.MHz,
                 "drag_coefficient": 0.0,
                 "ac_stark_shift": 0.0 * u.MHz,
-                "IF": -492.2*u.MHz #- shift_LO,
+                "IF": -133379054.6015596 - shift_LO, 
             },
         }
         QUBIT_CONSTANTS = self.QUBIT_CONSTANTS
@@ -337,7 +352,7 @@ class multiplexed_configuation_class:
         self.RL_CONSTANTS = {
             "rl1": {
                 "LO": 7.0 * u.GHz,
-                "RESONATORS": ["q1_rr", "q2_rr", "q3_rr", "q4_rr", "q5_rr", "q6_rr"],
+                "RESONATORS": ["q1_rr", "q2_rr", "q3_rr", "q4_rr", "q5_rr", "q6_rr", "q3_re"],
                 "TOF": 24 + 272,
                 "rl_con": "con1",
                 "delay": 0,
@@ -350,13 +365,13 @@ class multiplexed_configuation_class:
 
         self.RR_CONSTANTS = {
             "q1_rr": {
-                "amplitude": 0.005,
-                "readout_length": 8608,
+                "amplitude": 0.00367999494429647,
+                "readout_length": 7900,
                 "midcircuit_amplitude": 0.2511, 
                 "mc_readout_length": 3000,
-                "IF": 92174364.0,    
-                "rotation_angle": ((254.9) / 180) * np.pi,
-                "ge_threshold": 1.1816289,
+                "IF": 92235772.2283304,    
+                "rotation_angle": ((218.2) / 180) * np.pi,
+                "ge_threshold": 1.1810696,
                 "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
                 "midcircuit_ge_threshold": 0.0,
                 "use_opt_readout": False,
@@ -374,13 +389,13 @@ class multiplexed_configuation_class:
                 "use_opt_readout": False,
             },
             "q3_rr": {
-                "amplitude": 0.005,
-                "readout_length": 5120,
+                "amplitude": 0.004022079343504818,
+                "readout_length": 7900,
                 "midcircuit_amplitude": 0.2238, 
                 "mc_readout_length": 3000,
-                "IF": 156.8392 * u.MHz,     
-                "rotation_angle": (247.2 / 180) * np.pi,
-                "ge_threshold": 1.1815551,
+                "IF": 156815647.62171888,     
+                "rotation_angle": (28.1 / 180) * np.pi,
+                "ge_threshold": 1.1813225,
                 "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
                 "midcircuit_ge_threshold": 0.0,
                 "use_opt_readout": False,
@@ -398,13 +413,13 @@ class multiplexed_configuation_class:
                 "use_opt_readout": False,
             },
             "q5_rr": {
-                "amplitude": 0.0055, 
-                "readout_length": 3000,
+                "amplitude": 0.005141122375950503, 
+                "readout_length": 7000,
                 "midcircuit_amplitude": 0.3548, 
                 "mc_readout_length": 3000,
-                "IF": 211.052 * u.MHz,    
-                "rotation_angle": ((285.4 + 241-3.5) / 180) * np.pi,
-                "ge_threshold": 1.182e-0 -4.749e-04,
+                "IF": 211044744.4109622,    
+                "rotation_angle": ((159.9) / 180) * np.pi,
+                "ge_threshold": 1.1811447,
                 "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
                 "midcircuit_ge_threshold": 0.0,
                 "use_opt_readout": False,
@@ -420,19 +435,19 @@ class multiplexed_configuation_class:
                 "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
                 "midcircuit_ge_threshold": 0.0,
                 "use_opt_readout": False,
+            },            
+            "q3_re": {
+                "amplitude": 0.002036230131150238,
+                "readout_length": 7.840000e+03,
+                "midcircuit_amplitude": 0.2238, 
+                "mc_readout_length": 3000,
+                "IF": 1.568350e+08 -339195,     
+                "rotation_angle": (218.2 / 180) * np.pi,
+                "ge_threshold": 1.1813225-5.593e-04,
+                "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
+                "midcircuit_ge_threshold": 0.0,
+                "use_opt_readout": False,
             },
-            # "q1_re": {
-            #     "amplitude": 0.005,
-            #     "readout_length": 8608,
-            #     "midcircuit_amplitude": 0.2511, 
-            #     "mc_readout_length": 3000,
-            #     "IF": 92264364.0,    
-            #     "rotation_angle": 4.305568e+00,
-            #     "ge_threshold": 1.1816289-4.717399e-05,
-            #     "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
-            #     "midcircuit_ge_threshold": 0.0,
-            #     "use_opt_readout": False,
-            # },
         }
         RR_CONSTANTS = self.RR_CONSTANTS
 
@@ -441,6 +456,8 @@ class multiplexed_configuation_class:
 
         if use_calibrated_values:
             for qubit_key, constants in zip(CALIBRATION_QUBITS, RR_CONSTANTS.values()):
+                # if qubit_key in ['q3_ef']:
+                #     continue
                 for param in UPDATEABLE_PARAMETER_NAMES:
                     if SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] == 'IF':
                         # Due to overlap in names for qubit and resonator, we need to be specific
@@ -797,6 +814,10 @@ class multiplexed_configuation_class:
 
 def create_multiplexed_configuration(
     use_calibrated_values = True, 
-    use_override_values = False,
+    use_override_values = True,
 ):
     return multiplexed_configuation_class(use_calibrated_values, use_override_values)
+
+
+if __name__ == "__main__":
+    mc = create_multiplexed_configuration()

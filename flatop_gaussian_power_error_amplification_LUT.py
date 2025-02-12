@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 from qualang_tools.results.data_handler import DataHandler
 from scipy import optimize
 from typing import *
+from copy import deepcopy
 
 MINIMUM_SLOPE_SCALE = 0.1  # Factor of original slope in peak_turnover function that determines cut-off condition
 
@@ -52,11 +53,11 @@ class Power_error_amplification:
     def power_rabi_pulse(
         self,
         simulate: bool = False,
-        n_avg: int = 25,
+        n_avg: int = 100,
         a_min: float = 0.5,
         a_max: float = 1.5,
         n_a: int = 100,
-        max_nb_of_pulses: int = 30,
+        max_nb_of_pulses: int = 10,
         nb_pulse_step: int = 2,
     ):
         """
@@ -75,6 +76,7 @@ class Power_error_amplification:
         self.amplitude_sweep = np.linspace(a_min, a_max, n_a)
         # Number of applied Rabi pulses sweep
         nb_of_pulses = np.arange(0, max_nb_of_pulses, nb_pulse_step)  # Always play an odd/even number of pulses to end up in the same state
+        self.t_risefall = 50  # rise/fall time (in ns) of
 
         power_rabi_error_amplification_data = {
             "qubit": self.qubit,
@@ -89,7 +91,51 @@ class Power_error_amplification:
             "amplitudes": self.amplitude_sweep,
             "qubit_octave_gain": self.mc.qubit_octave_gain,
             "resonator_octave_gain": self.mc.resonator_octave_gain,
+            "t_risefall": self.t_risefall,  # rise/fall time (in ns) of
         }
+
+        #########################
+        ### Precompile Pulses ###
+        #########################
+        # generate config pulses to match time sweep
+        config_copy = deepcopy(self.mc.config)  # copy the config for safety
+        probe_qubit = self.qubit
+        copy_x90_pulse = deepcopy(self.mc.config['pulses'][f'x180_pulse_{probe_qubit}'])  # Copy the x180 pulse dict so we don't change the original
+        x90_I_wf_copy = deepcopy(self.mc.config['waveforms'][f"x180_I_wf_{probe_qubit}"])  # Same for waveform. Will be used for both I and Q
+        x180_amp = self.mc.QUBIT_CONSTANTS[probe_qubit]["pi_amplitude"]
+        # scale down the original amplitude linearly to match the dispersion shift
+
+        # Calculate new waveforms for I and Q
+        t=round(2*self.t_risefall+12800)//4
+        I_wf0, Q_wf0 = np.array(
+            flattop_gaussian_risefall_waveforms(
+                amplitude = 0.0004, 
+                flatlength = round(4*t) - round(2*self.t_risefall), 
+                risefalllength = self.t_risefall,
+                sigma=2*self.t_risefall/5,
+            )
+        )  # create a pulse with only I_wf
+
+        # Rotate phase of pulse to y-axis
+        shift = 1/4
+        I_wf = I_wf0*np.cos(2*np.pi*shift) - Q_wf0*np.sin(2*np.pi*shift)
+        Q_wf = I_wf0*np.sin(2*np.pi*shift) + Q_wf0*np.cos(2*np.pi*shift)
+
+        config_copy['elements'][probe_qubit]['operations'][f'xvar{t}'] = f'xvar{t}_pulse_{probe_qubit}'
+
+        # Assign modified waveform to I
+        x90_I_wf_copy['samples'] = deepcopy(I_wf)
+        config_copy['waveforms'][f'xvar{t}_I_wf_{probe_qubit}'] = deepcopy(x90_I_wf_copy)
+        # Assign modified waveform to Q
+        x90_I_wf_copy['samples'] = deepcopy(Q_wf)
+        config_copy['waveforms'][f'xvar{t}_Q_wf_{probe_qubit}'] = deepcopy(x90_I_wf_copy)
+
+        # Create new pulse
+        copy_x90_pulse['length'] = round(4*t)
+        copy_x90_pulse['waveforms']['I'] = f'xvar{t}_I_wf_{probe_qubit}'  # refer to new I waveform
+        copy_x90_pulse['waveforms']['Q'] = f'xvar{t}_Q_wf_{probe_qubit}'  # refer to new Q waveform
+        # Assign copy of modified dict so each new pulse points to a unique dictionary, rather than the same mutible one
+        config_copy['pulses'][f'xvar{t}_pulse_{probe_qubit}']=deepcopy(copy_x90_pulse)  
 
         with program() as power_rabi_err:
             n = declare(int)  # QUA variable for the averaging loop
@@ -113,9 +159,10 @@ class Power_error_amplification:
                         # Loop for error amplification (perform many qubit pulses with varying amplitudes)
                         with for_(n2, 0, n2 < n_rabi, n2 + 1):
                             if self.parameter_name == 'pi_':
-                                play("x180" * amp(a), self.qubit)
+                                play(f'xvar{t}' * amp(a), self.qubit)
+                                # play("x180" * amp(a), self.qubit)
                             elif self.parameter_name == 'pi_half_':
-                                play("x90" * amp(a), self.qubit)
+                                play(f'xvar{t}' * amp(a), self.qubit)
                             else:
                                 raise ValueError(f'{self.parameter_name} unsupported. Must be "pi_" or "pi_half_')
                         # Align the two elements to measure after playing the qubit pulses.
@@ -166,70 +213,68 @@ class Power_error_amplification:
         # Run or Simulate Program #
         ###########################
 
-        if simulate:
-            # Simulates the QUA program for the specified duration
-            simulation_config = SimulationConfig(duration=10_000)  # In clock cycles = 4ns
-            job = qmm.simulate(self.mc.config, power_rabi_err, simulation_config)
-                # get DAC and digital samples
-            samples = job.get_simulated_samples()
-            # get the waveform report object and plot
-            waveform_report = job.get_simulated_waveform_report()
-            waveform_report.create_plot(samples, plot=True, save_path="./Simulated_Waveforms/")
+        # simulation_config = SimulationConfig(duration=10_000)  # In clock cycles = 4ns
+        # job = qmm.simulate(config_copy, power_rabi_err, simulation_config)
+        #     # get DAC and digital samples
+        # samples = job.get_simulated_samples()
+        # # get the waveform report object and plot
+        # waveform_report = job.get_simulated_waveform_report()
+        # waveform_report.create_plot(samples, plot=True, save_path="./Simulated_Waveforms/")
+        # assert False
 
-        else:
-            # Open the quantum machine
-            qm = qmm.open_qm(self.mc.config)
-            # Send the QUA program to the OPX, which compiles and executes it
-            job = qm.execute(power_rabi_err)
-            # Get results from QUA program
-            results = fetching_tool(job, data_list=["I", "Q", "iteration"], mode="live")
-            # Live plotting
-            fig = plt.figure()
-            interrupt_on_close(fig, job)  # Interrupts the job when closing the figure
-            while results.is_processing():
-                # Fetch results
-                I, Q, iteration = results.fetch_all()
-                # Convert the results into Volts
-                I = self.mc.u.demod2volts(I, self.mc.RR_CONSTANTS[self.resonator]["readout_length"]) 
-                Q = self.mc.u.demod2volts(Q, self.mc.RR_CONSTANTS[self.resonator]["readout_length"])
-                # Progress bar
-                progress_counter(iteration, n_avg, start_time=results.get_start_time())
-                # Plot results
-                plt.suptitle("Power Rabi with error amplification")
-                plt.subplot(221)
-                plt.cla()
-                plt.pcolor(self.amplitude_sweep * self.amplitude, nb_of_pulses, I)
-                plt.xlabel("Rabi pulse amplitude [V]")
-                plt.ylabel("# of Rabi pulses")
-                plt.title("I quadrature [V]")
-                plt.subplot(222)
-                plt.cla()
-                plt.pcolor(self.amplitude_sweep * self.amplitude, nb_of_pulses, Q)
-                plt.xlabel("Rabi pulse amplitude [V]")
-                plt.title("Q quadrature [V]")
-                plt.subplot(212)
-                plt.cla()
-                plt.plot(self.amplitude_sweep * self.amplitude, np.sum(Q, axis=0))
-                plt.xlabel("Rabi pulse amplitude [V]")
-                plt.ylabel("Sum along the # of Rabi pulses")
-                plt.pause(1)
-                plt.tight_layout()
-            power_rabi_error_amplification_data["I"] = I
-            power_rabi_error_amplification_data["Q"] = Q
-            power_rabi_error_amplification_data["figure"] = fig
-            plt.close()
+        # Open the quantum machine
+        qm = qmm.open_qm(config_copy)
+        # Send the QUA program to the OPX, which compiles and executes it
+        job = qm.execute(power_rabi_err)
+        # Get results from QUA program
+        results = fetching_tool(job, data_list=["I", "Q", "iteration"], mode="live")
+        # Live plotting
+        fig = plt.figure()
+        interrupt_on_close(fig, job)  # Interrupts the job when closing the figure
+        while results.is_processing():
+            # Fetch results
+            I, Q, iteration = results.fetch_all()
+            # Convert the results into Volts
+            I = self.mc.u.demod2volts(I, self.mc.RR_CONSTANTS[self.resonator]["readout_length"]) 
+            Q = self.mc.u.demod2volts(Q, self.mc.RR_CONSTANTS[self.resonator]["readout_length"])
+            # Progress bar
+            progress_counter(iteration, n_avg, start_time=results.get_start_time())
+            # Plot results
+            plt.suptitle("Power Rabi with error amplification")
+            plt.subplot(221)
+            plt.cla()
+            plt.pcolor(self.amplitude_sweep * self.amplitude, nb_of_pulses, I)
+            plt.xlabel("Rabi pulse amplitude [V]")
+            plt.ylabel("# of Rabi pulses")
+            plt.title("I quadrature [V]")
+            plt.subplot(222)
+            plt.cla()
+            plt.pcolor(self.amplitude_sweep * self.amplitude, nb_of_pulses, Q)
+            plt.xlabel("Rabi pulse amplitude [V]")
+            plt.title("Q quadrature [V]")
+            plt.subplot(212)
+            plt.cla()
+            plt.plot(self.amplitude_sweep * self.amplitude, np.sum(Q, axis=0))
+            plt.xlabel("Rabi pulse amplitude [V]")
+            plt.ylabel("Sum along the # of Rabi pulses")
+            plt.pause(1)
+            plt.tight_layout()
+        power_rabi_error_amplification_data["I"] = I
+        power_rabi_error_amplification_data["Q"] = Q
+        power_rabi_error_amplification_data["figure"] = fig
+        plt.close()
 
-            fit_dict, fig_fit = self.power_analysis(I, Q)
-            power_rabi_error_amplification_data["fit_dict"] = fit_dict
-            power_rabi_error_amplification_data["fit_figure"] = fig_fit
+        fit_dict, fig_fit = self.power_analysis(I, Q)
+        power_rabi_error_amplification_data["fit_dict"] = fit_dict
+        power_rabi_error_amplification_data["fit_figure"] = fig_fit
 
-            data_folder = data_handler.save_data(
-                power_rabi_error_amplification_data, 
-                name=f"{self.qubit}_power_{self.parameter_name}_error_amplification"
-            )
-            plt.close()
+        data_folder = data_handler.save_data(
+            power_rabi_error_amplification_data, 
+            name=f"{self.qubit}_power_{self.parameter_name}_error_amplification"
+        )
+        plt.close()
 
-            return fit_dict, data_folder
+        return fit_dict, data_folder
 
 
     def power_analysis(self, I, Q):
@@ -427,12 +472,11 @@ class Power_error_amplification:
 
 if __name__ == "__main__":
     pea = Power_error_amplification(
-        qubit = "q3_xy",
-        parameter_name = 'pi_half_', #half_
+        qubit = "q3_ef",
+        parameter_name = 'pi_', #half_
     )
     pea.power_rabi_pulse(
-        a_min = 0.5, #0.75
-        a_max = 2.1, #1.25,
-        nb_pulse_step=4,
-        # simulate=True,
+        a_min = 0.5,
+        a_max = 2.1,
+        nb_pulse_step=2,
     )

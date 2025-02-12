@@ -14,12 +14,13 @@ from readout_frequency_optimization import readout_frequency_optimization
 from readout_weights_optimization import readout_weights_optimization
 from e_f_rabi_chevron_calibration import ef_rabi_chevron
 from parity_beating_calibration import parity_ramsey
+from e_f_T1e_T1_f_calibration import ef_t2star_t13_t1f
+from e_f_Ramsey_background_subtracted_calibration import ef_t2star_background
 
 import importlib
 from create_multiplexed_configuration import *
 from utils import *
 
-DATAFRAME_FILE = "./calibration_database.pkl"
 MAX_ATTEMPTS = 3
 AMPLITUDE_CHANGE_THRESHOLD = 10 #0.50  # 10% deviation tolerated
 Q_FREQUENCY_CHANGE_THRESHOLD = 20_200_000  # 1.2 kHz tolerated
@@ -27,6 +28,7 @@ RR_FREQUENCY_CHANGE_THRESHOLD = 1_600_000  # 10 kHz tolerated
 READOUT_AMPLITUDE_CHANGE_THRESHOLD = 0.50  # 10% deviation tolerated
 READOUT_DURATION_CHANGE_THRESHOLD = 0.75  # 5% deviation tolerated
 IQ_THRESHOLD = 90  # 90% Readout fidelity tolerated
+EF_IQ_THRESHOLD = 85
 
 
 class Node: 
@@ -67,6 +69,7 @@ class Node:
         refresh_time: float,
         expiration_time: float,
         retry_time: float,
+        parent_parameters: List[str] = [],
         fresh: bool = False,
         update_calibration_config = True,
     ):
@@ -92,6 +95,7 @@ class Node:
         self.expiration_time = expiration_time
         self.retry_time = retry_time
         self.fresh = fresh
+        self.parent_parameters = parent_parameters
         self.qubits_to_calibrate = qubits_to_calibrate
         self.calibration_value = np.nan
         self.calibration_values = []
@@ -160,12 +164,12 @@ class Node:
                 refresh_time = 0
                 now_time = 0
 
-            i_attempt = 0
+            self.i_attempt = 0
             
             # If it's time to refresh this qubit, then run the measurement
             # If initialize = True, ignore timing and run.
-            if (latest_time + refresh_time < now_time) or self.initialize:
-                while i_attempt < MAX_ATTEMPTS and not self.calibration_success:
+            if ((latest_time + refresh_time < now_time) and self.check_parents()) or self.initialize:
+                while self.i_attempt < MAX_ATTEMPTS and not self.calibration_success:
                     # If the last attempt (possibly by another qubit) overwrote these values
                     # we need to reset them
                     self.calibration_value = np.nan
@@ -179,9 +183,9 @@ class Node:
                         tb = traceback.format_exc()
                         print(f'Failed Attempt. Try again. Exception: {tb}')
                         self.exception_log.append(tb)
-                    i_attempt +=1
+                    self.i_attempt +=1
 
-                if i_attempt >= MAX_ATTEMPTS:
+                if self.i_attempt >= MAX_ATTEMPTS:
                     # Save whatever we have to the database
                     print(f'Failed after {MAX_ATTEMPTS} attempts.')
                     self.exception_log.append(f'Failed after {MAX_ATTEMPTS} attempts.')
@@ -192,10 +196,10 @@ class Node:
     
         
     def success_condition(
-            self, 
-            calibration_value: Union[float, List[float]],
-            threshold: Union[float, List[float]],
-            percent_change_bool: bool = True
+        self, 
+        calibration_value: Union[float, List[float]],
+        threshold: Union[float, List[float]],
+        percent_change_bool: bool = True
     ):
         """
         A Basic check for success by seeing if the new value is within a threshold of the old value. The threshold can
@@ -241,7 +245,27 @@ class Node:
                 self.calibration_success = True
         #TODO: upgrade from print statement to logging
         print(f'calibration success: {self.calibration_success}')
-    
+
+
+    def check_parents(self):
+        """
+        Check each parent parameter. Did the most recent calibration of that parameter succeed?
+        If all parent parameters have succeeded, then attempt the current calibration
+        """
+        successes = []
+        if not self.parent_parameters:
+            # empty list means don't check anything
+            return True
+        # Otherwise, check parent parameters
+        for pp in self.parent_parameters:
+            successes.append(
+                self.loaded_database.loc[
+                    (self.loaded_database.calibration_parameter_name == pp) &
+                    (self.loaded_database.qubit_name == self.current_qubit)
+                ].iloc[-1]['calibration_success']
+            )
+        return np.all(successes)
+
 
     def calibration_measurement(self):
         """
@@ -283,7 +307,17 @@ class Node:
                 self.miscellaneous,
             ]
             self.loaded_database.loc[len(self.loaded_database.index)] = new_row
-        self.loaded_database.to_pickle(DATAFRAME_FILE)
+        # Keyboard interrupting the to_pickle command irreparably corrupts the pickle file.
+        # To combat this, use try-except to handle keyboard interrupts, and save a backup database.
+        try:
+            self.loaded_database.to_pickle(DATAFRAME_FILE)
+            self.loaded_database.to_pickle(BACKUP_DATAFRAME_FILE)
+        except KeyboardInterrupt:
+            print("KEYBOARD INTERRUPT CAUGHT WHILE SAVING DATABASE. Retry saving then throw KeyboardInterrupt")
+            self.loaded_database.to_pickle(DATAFRAME_FILE)
+            self.loaded_database.to_pickle(BACKUP_DATAFRAME_FILE)
+            raise KeyboardInterrupt
+        
         # self.reimport_multiplex_configuration()  # Until we update the config directly
 
     
@@ -397,8 +431,8 @@ class Qubit_Amplitude_Node(Node):
         fresh: bool = False,
         pulse_parameter_name: str = 'pi_', 
         nb_pulse_step: int = 2,
-        a_min: float = 0.75,
-        a_max: float = 1.25,
+        a_min: float = 0.5, #0.75, for octave gain 6
+        a_max: float = 1.5, #1.25,
     ):
         """
         Initialize parameters for this class. The parent class arguments are the same.
@@ -513,6 +547,7 @@ class Parity_Beat_Node(Node):
         self,  
         calibration_parameter_name: str,
         qubits_to_calibrate: List[str],
+        parent_parameters: List[str],
         refresh_time: float,
         expiration_time: float,
         retry_time: float,
@@ -533,21 +568,60 @@ class Parity_Beat_Node(Node):
         NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
         because the while loop terminates when it becomes True.
         """
-
-        pr = parity_ramsey(
+        pr = ef_t2star_background(
+        # pr = ef_t2star_t13_t1f(
             probe_qubit = self.current_qubit,
         )
-        pr.run_parity_ramsey()
+        pr.run_ef_t2star_t13_t1f()
 
         fit_dict = pr.fit_dict
-        parity_beat = np.abs(fit_dict['frequency1'] - fit_dict['frequency2'])
-        avg_freq = np.mean([fit_dict['frequency1'], fit_dict['frequency2']])
-        self.calibration_values = [avg_freq, parity_beat]
+        f_artificial = pr.f_artificial  # Already in Hz
+        # print(f'{f_artificial=}')
+        if 'frequency1' in fit_dict.keys():
+            parity_beat = np.abs(fit_dict['frequency1'] - fit_dict['frequency2'])
+            avg_freq = np.mean([fit_dict['frequency1'], fit_dict['frequency2']])
+        else:
+            avg_freq = fit_dict['frequency']
+            parity_beat = 0
+        # print(f'{avg_freq=}')
+        detuning = f_artificial - avg_freq*1e9  # convert fit freq to Hz from GHz
+        original_IF = pr.multiplex_ramsey_data["QUBIT_CONSTANTS"][self.current_qubit]['IF']
+        self.calibration_value = original_IF+detuning #, parity_beat]
+        # print(self.calibration_value)
         data_folder = pr.data_folder
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
-        self.success_condition(avg_freq, Q_FREQUENCY_CHANGE_THRESHOLD, False)
+        self.success_condition(self.calibration_value, Q_FREQUENCY_CHANGE_THRESHOLD, False)
         return fit_dict
+        
+
+    def check_parents(self):
+        """
+        Check each parent parameter. Did the most recent calibration of that parameter succeed?
+        If all parent parameters have succeeded, then attempt the current calibration
+        """
+        successes = []
+        if not self.parent_parameters:
+            # empty list means don't check anything
+            return True
+        # Otherwise, check parent parameters
+        for pp in self.parent_parameters:
+            successes.append(
+                self.loaded_database.loc[
+                    (self.loaded_database.calibration_parameter_name == pp) &
+                    (self.loaded_database.qubit_name == self.current_qubit)
+                ].iloc[-1]['calibration_success']
+            )
+        # Additional constraint that readout fidelity > threshold
+        dfq = self.loaded_database.loc[
+            (self.loaded_database.calibration_parameter_name == 'readout_fidelity') &
+            (self.loaded_database.qubit_name in self.qubits_to_calibrate)
+        ].iloc[-1]
+        if dfq['calibration_value'] > EF_IQ_THRESHOLD:
+            successes.append(True)
+        else:
+            successes.append(False)
+        return np.all(successes)
 
 
 
@@ -601,7 +675,7 @@ class EF_Rough_Amplitude_Frequency_Node(Node):
         
         self.experiment_data_location = data_folder
         self.miscellaneous.update({'fit_dict': fit_dict})
-        pi_amplitude = fit_dict['amplitude']['amp_fit_values']['center']*fit_dict['scaled_original_amplitude']
+        pi_amplitude = fit_dict['amplitude']['fit_values']['center']*fit_dict['scaled_original_amplitude']
         pi_half_amplitude = pi_half_amp*fit_dict['scaled_original_amplitude']
         qubit_IF = fit_dict['new_IF']
         self.calibration_values = [pi_amplitude, pi_half_amplitude, qubit_IF]
@@ -650,10 +724,34 @@ class Resonator_Amplitude_Node(Node):
             ground_outliers: list, 
             excited_outliers: list,
         ):
-        if (fidelity > IQ_THRESHOLD) and (len(ground_outliers) < 2) and (len(excited_outliers) < 2):
-            self.calibration_success = True  
+        self.calibration_success = False
+
+        if self.current_qubit[-2:] == 'ef':
+            # standard for e-f qubits is lower
+            fid_thres = EF_IQ_THRESHOLD
         else:
-            self.calibration_success = False
+            fid_thres = IQ_THRESHOLD
+
+        if (fidelity > fid_thres) and (len(ground_outliers) < 2) and (len(excited_outliers) < 2):
+            # If surpass threshold, success
+            self.calibration_success = True 
+
+        if self.i_attempt == MAX_ATTEMPTS - 1: #and self.current_qubit[-2:] == 'ef': # Final attempt
+            # If we saw improvement over the course of the attempts, call it a success
+            df = self.loaded_database
+            dfq = df.loc[
+                (df.calibration_parameter_name == 'readout_amplitude') &
+                (df.qubit_name == self.current_qubit)
+            ].iloc[-1*self.i_attempt:]
+            for ii in range(self.i_attempt):
+                if dfq['miscellaneous'].iloc[-1*(ii+1)]['results_dict']['improved']:
+                    # If one of the attempts improved, it is preserved as the initial_amplitude in the next
+                    # attempt, which is set as the best amplitude in a failed attempt.
+                    self.calibration_success = True 
+                    break
+            
+
+
         print(f'calibration success: {self.calibration_success}')
 
 
@@ -665,7 +763,8 @@ class Resonator_Amplitude_Node(Node):
 
         results_dict = readout_amplitude_binary_search(
             qubit = self.current_qubit,
-            resonator = Node.multiplexed_config.qubit_resonator_correspondence[self.current_qubit]
+            resonator = Node.multiplexed_config.qubit_resonator_correspondence[self.current_qubit],
+            i_attempt = self.i_attempt,
         )
         data_folder = results_dict['data_folder']
         fidelity = results_dict['rotated']['best']['fidelity']

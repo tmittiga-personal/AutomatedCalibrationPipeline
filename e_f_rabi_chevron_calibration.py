@@ -30,10 +30,10 @@ from utils import *
 def ef_rabi_chevron(
     current_qubit: str,
     a_min: float = 0,
-    a_max: float = 2.1,
+    a_max: float = 2,
     n_a: int = 31,
-    f_min: float = -25,  # MHz
-    f_max: float = -8,
+    f_min: float = -15,  # MHz
+    f_max: float = 15,
     f_step: float = 0.5,
     n_avg: int = 30,
 ):
@@ -209,7 +209,7 @@ def ef_rabi_chevron(
             fs,
             amplitude_rabi_chevron_data,
         )
-        fit_dict['scaled_original_amplitude'] = x180_amp/mc.amplitude_scaling,
+        fit_dict['scaled_original_amplitude'] = x180_amp/mc.amplitude_scaling
         fit_dict['new_IF'] = qubit_IF + fit_dict['frequency']['fit_values']['center']
         amplitude_rabi_chevron_data["fit_figure"] = fig2
 
@@ -233,6 +233,11 @@ def fit_lineouts(
     freq_lineout = np.mean(R, axis=1)
     amp_lineout = np.mean(R, axis=0)
 
+    # Is the peak positive or negative? Compare center and edge. Works for well-centered data
+    positive_peak = True if amp_lineout[round(len(amp_lineout)/2)] > amp_lineout[0] else False
+        
+    
+
     fitfunc = lambda x, *p, :  p[0]*np.exp(-( ( (x-p[1])/p[2] )**2 )/2) + p[3]
 
     # amplitude fit
@@ -243,14 +248,24 @@ def fit_lineouts(
     ydiff = ymax - ymin
     s = np.flatnonzero(y > ydiff/2 + ymin) # Find data points above middle y value. First and last points used to estimate width
     # Seed paramters: amplitude, center, width, background
-    p0 = [
-        ydiff, 
-        x[np.argmax(y)], 
-        np.abs(x[s[0]]- x[s[-1]])/np.sqrt(8*np.log(2)), 
-        ymin,
-    ]
-    bounds = ([0, xmin, 0, ymin-10*ydiff],
-                [2*ydiff, xmax, 10*(xmax-xmin), ymax+10*ydiff])
+    if positive_peak:
+        p0 = [
+            ydiff, 
+            x[np.argmax(y)], 
+            np.abs(x[s[0]]- x[s[-1]])/np.sqrt(8*np.log(2)), 
+            ymin,
+        ]
+        bounds = ([0, xmin, 0, ymin-10*ydiff],
+                    [2*ydiff, xmax, 10*(xmax-xmin), ymax+10*ydiff])
+    else:  # Negative peak
+        p0 = [
+           -ydiff, 
+            x[np.argmin(y)], 
+            np.abs(x[s[0]]- x[s[-1]])/np.sqrt(8*np.log(2)), 
+            ymax,
+        ]
+        bounds = ([-2*ydiff, xmin, 0, ymin-10*ydiff],
+                    [0, xmax, 10*(xmax-xmin), ymax+10*ydiff])
     amp_fit_params, covar = optimize.curve_fit(fitfunc, x, y, p0=p0, bounds=bounds)
     amp_std_vec = np.sqrt(np.diag(covar))
 
@@ -270,14 +285,24 @@ def fit_lineouts(
     ydiff = ymax - ymin
     s = np.flatnonzero(y > ydiff/2 + ymin) # Find data points above middle y value. First and last points used to estimate width
     # Seed paramters: amplitude, center, width, background
-    p0 = [
-        ydiff, 
-        x[np.argmax(y)], 
-        np.abs(x[s[0]]- x[s[-1]])/np.sqrt(8*np.log(2)), 
-        ymin,
-    ]
-    bounds = ([0, xmin, 0, ymin-10*ydiff],
-                [2*ydiff, xmax, 10*(xmax-xmin), ymax+10*ydiff])
+    if positive_peak:
+        p0 = [
+            ydiff, 
+            x[np.argmax(y)], 
+            np.abs(x[s[0]]- x[s[-1]])/np.sqrt(8*np.log(2)), 
+            ymin,
+        ]
+        bounds = ([0, xmin, 0, ymin-10*ydiff],
+                    [2*ydiff, xmax, 10*(xmax-xmin), ymax+10*ydiff])
+    else:  # Negative peak
+        p0 = [
+           -ydiff, 
+            x[np.argmin(y)], 
+            np.abs(x[s[0]]- x[s[-1]])/np.sqrt(8*np.log(2)), 
+            ymax,
+        ]
+        bounds = ([-2*ydiff, xmin, 0, ymin-10*ydiff],
+                    [0, xmax, 10*(xmax-xmin), ymax+10*ydiff])
     freq_fit_params, covar = optimize.curve_fit(fitfunc, x, y, p0=p0, bounds=bounds)
     freq_std_vec = np.sqrt(np.diag(covar))
 
@@ -333,7 +358,9 @@ def fit_lineouts(
 if __name__ == "__main__":
     # while True:
     #     try:
-    ef_rabi_chevron('q1_ef')
+    fit_dict, pi_half, _ = ef_rabi_chevron('q3_ef')
+    print(fit_dict)
+    print(pi_half)
         # except Exception as e:
         #     print(e)
         #     continue

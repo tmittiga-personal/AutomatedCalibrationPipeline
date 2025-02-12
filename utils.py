@@ -11,6 +11,9 @@ from qualang_tools.analysis.discriminator import _false_detections
 # So we want to switch from precompiled zero pulses to the wait command after this threshold time.
 QM_DYNAMICAL_UPDATE_TIME_THRESHOLD = 1000//4
 
+DATAFRAME_FILE = "./calibration_database_2025.pkl"
+BACKUP_DATAFRAME_FILE = "./calibration_database_2025_BACKUP.pkl"
+
 # Controls which calibration parameters are actively updated.
 UPDATEABLE_PARAMETER_NAMES = [
     'pi_amplitude', 
@@ -44,18 +47,48 @@ SEARCH_PARAMETER_KEY_CORRESPONDENCE = {
 def pull_latest_calibrated_values(
     qubits: List[str],
     search_parameter_names: List[str],
-    n_latest: int = 1
+    all_attempts: bool = False,
 ):
     assert isinstance(qubits, list), 'qubits must be a list of qubit names'
 
-    DATAFRAME_FILE = "./calibration_database.pkl"
     df = pd.read_pickle(DATAFRAME_FILE)
 
-    df_found = df.loc[
+    if all_attempts:
+        df_found = df.loc[
+            (df['calibration_parameter_name'].isin(search_parameter_names)) &
+            (df['qubit_name'].isin(qubits))
+        ].drop_duplicates(subset = ['qubit_name', 'calibration_parameter_name'], keep='last')
+    else:
+        df_found = df.loc[
             (df['calibration_parameter_name'].isin(search_parameter_names)) &
             (df['qubit_name'].isin(qubits)) &
             (df.calibration_success == True)
         ].drop_duplicates(subset = ['qubit_name', 'calibration_parameter_name'], keep='last')
+    
+    return df_found
+
+
+def pull_latest_n_calibrated_values(
+    qubits: List[str],
+    search_parameter_names: List[str],
+    n_latest: int = 1,
+    all_attempts: bool = False,
+):
+    assert isinstance(qubits, list), 'qubits must be a list of qubit names'
+
+    df = pd.read_pickle(DATAFRAME_FILE)
+
+    if all_attempts:
+        df_found = df.loc[
+            (df['calibration_parameter_name'].isin(search_parameter_names)) &
+            (df['qubit_name'].isin(qubits))
+        ].iloc[-1*n_latest:]
+    else:
+        df_found = df.loc[
+            (df['calibration_parameter_name'].isin(search_parameter_names)) &
+            (df['qubit_name'].isin(qubits)) &
+            (df.calibration_success == True)
+        ].iloc[-1*n_latest:]
     
     return df_found
 
@@ -199,3 +232,43 @@ def two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=True):
     fig.tight_layout()
 
     return angle, threshold, fidelity, gg, ge, eg, ee, fig
+
+
+def flattop_gaussian_risefall_waveforms(
+    amplitude, risefalllength, flatlength, sigma, subtracted=True, sampling_rate=1e9, **kwargs
+):
+    """
+
+    :param float amplitude: The amplitude in volts.
+    :param int length: The pulse length in ns.
+    :param float sigma: The gaussian standard deviation.
+    :param float alpha: The DRAG coefficient.
+    :param float anharmonicity: f_21 - f_10 - The differences in energy between the 2-1 and the 1-0 energy levels, in Hz.
+    :param float detuning: The frequency shift to correct for AC stark shift, in Hz.
+    :param bool subtracted: If true, returns a subtracted Gaussian, such that the first and last points will be at 0
+        volts. This reduces high-frequency components due to the initial and final points offset. Default is true.
+    :param float sampling_rate: The sampling rate used to describe the waveform, in samples/s. Default is 1G samples/s.
+    :return: Returns a tuple of two lists. The first list is the 'I' waveform (real part) and the second is the
+        'Q' waveform (imaginary part)
+    """
+    
+    t = np.arange(2*risefalllength, step=1e9 / sampling_rate)  # An array of size pulse length in ns
+    center = (2*risefalllength - 1e9 / sampling_rate) / 2
+    gauss_wave = amplitude * np.exp(-((t - center) ** 2) / (2 * sigma**2))  # The gaussian function
+    gauss_wave = gauss_wave - gauss_wave[-1]  # subtracted gaussian
+    z = gauss_wave + 1j * 0
+    
+    I_wf = z.real.tolist()  # The `I` component is the real part of the waveform
+    max_I = np.max(I_wf)  # extract any aliased maximum
+
+    # Insert flat period
+    rise_I = I_wf[:int(np.floor(len(I_wf)/2))]
+    fall_I = I_wf[int(np.floor(len(I_wf)/2)):]
+    t = np.arange(flatlength, step=1e9 / sampling_rate)
+    flat_I = np.zeros(len(t)) + max_I
+
+    I_wf = np.concatenate((rise_I, flat_I, fall_I))
+
+    # The `Q` component is the imaginary part of the waveform, which by definition is 0 here
+    Q_wf = np.zeros(len(I_wf)) 
+    return I_wf, Q_wf
