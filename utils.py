@@ -234,6 +234,157 @@ def two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=True):
     return angle, threshold, fidelity, gg, ge, eg, ee, fig
 
 
+def three_state_discriminator_plot(Ig, Qg, Ie, Qe, If, Qf, b_print=True):
+    """
+    Given three blobs in the IQ plane representing three states, finds the optimal thresholds to discriminate between them
+    and calculates the fidelity. Also returns the angle in which the data needs to be rotated in order to maximize the
+    information in the `I` (`X`) axis.
+
+    .. note::
+        This function assumes that there are only two blobs in the IQ plane representing two states (ground and excited)
+        Unexpected output will be returned in other cases.
+
+
+    :param float Ig: A vector containing the `I` quadrature of data points in the ground state
+    :param float Qg: A vector containing the `Q` quadrature of data points in the ground state
+    :param float Ie: A vector containing the `I` quadrature of data points in the excited state
+    :param float Qe: A vector containing the `Q` quadrature of data points in the excited state
+    :param bool b_print: When true (default), prints the results to the console.
+    :param bool b_plot: When true (default), plots the results in a new figure.
+    :returns: A tuple of (angle, threshold, fidelity, gg, ge, eg, ee).
+        angle - The angle (in radians) in which the IQ plane has to be rotated in order to have all the information in
+            the `I` axis.
+        threshold - The threshold in the rotated `I` axis. The excited state will be when the `I` is larger (>) than
+            the threshold.
+        fidelity - The fidelity for discriminating the states.
+        gg - The matrix element indicating a state prepared in the ground state and measured in the ground state.
+        ge - The matrix element indicating a state prepared in the ground state and measured in the excited state.
+        eg - The matrix element indicating a state prepared in the excited state and measured in the ground state.
+        ee - The matrix element indicating a state prepared in the excited state and measured in the excited state.
+    """
+    # As an approximation for maximizing hte information along I, rotate the 3 blobs as if we were just discriminating
+    # betweeen g and f (the two furthest blobs)
+    # Condition to have the Q equal for both states:
+    angle = np.arctan2(np.mean(Qf) - np.mean(Qg), np.mean(Ig) - np.mean(If))
+    C = np.cos(angle)
+    S = np.sin(angle)
+    # Condition for having e > Ig
+    if np.mean((Ig - If) * C - (Qg - Qf) * S) > 0:
+        angle += np.pi
+        C = np.cos(angle)
+        S = np.sin(angle)
+
+    # Rotate each blob by the same 2D rotation matrix
+    Ig_rotated = Ig * C - Qg * S
+    Qg_rotated = Ig * S + Qg * C
+
+    Ie_rotated = Ie * C - Qe * S
+    Qe_rotated = Ie * S + Qe * C
+    
+    If_rotated = If * C - Qf * S
+    Qf_rotated = If * S + Qf * C
+
+    fitge = minimize(
+        _false_detections,
+        0.5 * (np.mean(Ig_rotated) + np.mean(Ie_rotated)),
+        (Ig_rotated, Ie_rotated),
+        method="Nelder-Mead",
+    )
+    thresholdge = fitge.x[0]
+
+    fitef = minimize(
+        _false_detections,
+        0.5 * (np.mean(If_rotated) + np.mean(Ie_rotated)),
+        (If_rotated, Ie_rotated),
+        method="Nelder-Mead",
+    )
+    thresholdef = fitef.x[0]
+
+    gg1 = np.sum(Ig_rotated < thresholdge) / len(Ig_rotated)
+    ge1 = np.sum(Ig_rotated > thresholdge) / len(Ig_rotated)
+    eg1 = np.sum(Ie_rotated < thresholdge) / len(Ie_rotated)
+    ee1 = np.sum(Ie_rotated > thresholdge) / len(Ie_rotated)
+
+    ee2 = np.sum(Ie_rotated < thresholdef) / len(Ie_rotated)
+    ef2 = np.sum(Ie_rotated > thresholdef) / len(Ie_rotated)
+    fe2 = np.sum(If_rotated < thresholdef) / len(If_rotated)
+    ff2 = np.sum(If_rotated > thresholdef) / len(If_rotated)
+
+    fidelity1 = 100 * (gg1 + ee1) / 2
+    fidelity2 = 100 * (ee2 + ff2) / 2
+
+    if b_print:
+        print(
+            f"""
+        Fidelity Matrix:
+        -----------------
+        | {gg1:.3f} | {ge1:.3f} | {'N/A'} |
+        ----------------
+        | {eg1:.3f} | {ee1:.3f}/{ee2:.3f} | {ef2:.3f} |
+        ----------------
+        | {'N/A'} | {fe2:.3f} | {ff2:.3f} |
+        -----------------
+        IQ plane rotated by: {180 / np.pi * angle:.1f}{chr(176)}
+        Threshold_GE: {thresholdge:.3e}
+        Fidelity_GE: {fidelity1:.1f}%
+        Threshold_EF: {thresholdef:.3e}
+        Fidelity_EF: {fidelity2:.1f}%
+        """
+        )
+
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2)
+    ax1.plot(Ig, Qg, ".", alpha=0.1, label="Ground", markersize=2)
+    ax1.plot(Ie, Qe, ".", alpha=0.1, label="Excited", markersize=2)
+    ax1.plot(If, Qf, ".", alpha=0.1, label="f-State", markersize=2)
+    ax1.axis("equal")
+    ax1.legend(["Ground", "Excited", "f-State"])
+    ax1.set_xlabel("I")
+    ax1.set_ylabel("Q")
+    ax1.set_title("Original Data")
+
+    ax2.plot(Ig_rotated, Qg_rotated, ".", alpha=0.1, label="Ground", markersize=2)
+    ax2.plot(Ie_rotated, Qe_rotated, ".", alpha=0.1, label="Excited", markersize=2)
+    ax2.plot(If_rotated, Qf_rotated, ".", alpha=0.1, label="f-State", markersize=2)
+    ax2.axis("equal")
+    ax2.set_xlabel("I")
+    ax2.set_ylabel("Q")
+    ax2.set_title("Rotated Data")
+
+    ax3.hist(Ig_rotated, bins=50, alpha=0.75, label="Ground")
+    ax3.hist(Ie_rotated, bins=50, alpha=0.75, label="Excited")
+    ax3.hist(If_rotated, bins=50, alpha=0.75, label="f-State")
+    ax3.axvline(x=thresholdge, color="k", ls="--", alpha=0.5)
+    ax3.axvline(x=thresholdef, color="k", ls=":", alpha=0.5)
+    text_props = dict(
+        horizontalalignment="center",
+        verticalalignment="center",
+        transform=ax3.transAxes,
+    )
+    ax3.text(0.7, 0.9, f"ge: {thresholdge:.3e}", text_props)
+    ax3.text(0.7, 0.7, f"ef: {thresholdef:.3e}", text_props)
+    ax3.set_xlabel("I")
+    ax3.set_title("1D Histogram")
+
+    ax4.imshow(np.array([[gg1, ge1, 0], [eg1, ee1, ef2], [0, fe2, ff2]]))
+    ax4.set_xticks([0, 1, 2])
+    ax4.set_yticks([0, 1, 2])
+    ax4.set_xticklabels(labels=["|g>", "|e>", "|f>"])
+    ax4.set_yticklabels(labels=["|g>", "|e>", "|f>"])
+    ax4.set_ylabel("Prepared")
+    ax4.set_xlabel("Measured")
+    ax4.text(0, 0, f"{100 * gg1:.1f}%", ha="center", va="center", color="k")
+    ax4.text(1, 0, f"{100 * ge1:.1f}%", ha="center", va="center", color="w")
+    ax4.text(0, 1, f"{100 * eg1:.1f}%", ha="center", va="center", color="w")
+    ax4.text(1, 1, f"{100 * ee1:.1f}%", ha="center", va="center", color="k")
+    ax4.text(2, 1, f"{100 * ef2:.1f}%", ha="center", va="center", color="w")
+    ax4.text(1, 2, f"{100 * fe2:.1f}%", ha="center", va="center", color="w")
+    ax4.text(2, 2, f"{100 * ff2:.1f}%", ha="center", va="center", color="k")
+    ax4.set_title("Fidelities")
+    fig.tight_layout()
+
+    return angle, thresholdge, fidelity1, gg1, ge1, eg1, ee1, thresholdef, fidelity2, ee2, ef2, fe2, ff2, fig
+
+
 def flattop_gaussian_risefall_waveforms(
     amplitude, risefalllength, flatlength, sigma, subtracted=True, sampling_rate=1e9, **kwargs
 ):
@@ -272,3 +423,21 @@ def flattop_gaussian_risefall_waveforms(
     # The `Q` component is the imaginary part of the waveform, which by definition is 0 here
     Q_wf = np.zeros(len(I_wf)) 
     return I_wf, Q_wf
+
+
+### ONlY true for roughly equilateral triangle
+def tristate_threshold(i, q, vertical_ordering, funcs):
+    tmb = 0
+    if q > funcs[1](i) and q > funcs[0](i):
+        tmb = 2
+    elif q > funcs[2](i) and q < funcs[0](i):
+        tmb = 1
+    elif q < funcs[2](i) and q < funcs[1](i):
+        tmb = 0
+
+    if tmb == vertical_ordering['g']:
+        return -1
+    elif tmb == vertical_ordering['e']:
+        return 0
+    elif tmb == vertical_ordering['f']:
+        return 1

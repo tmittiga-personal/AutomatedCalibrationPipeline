@@ -33,13 +33,13 @@ class multiplexed_configuation_class:
             )
         OVERRIDE_QUBIT_CONSTANTS = {
             "q3_ef": {
-                # 'pi_amplitude': 0.11567684880138443,
+                # 'pi_amplitude': 0.0545*2,
                 # # "IF": -132853370.0,
-                # 'pi_half_amplitude': 0.05763013231970283,
+                # 'pi_half_amplitude': 0.0545,
             },   
             "q3_xy": {
-                # "pi_amplitude": 0.15142390913034726,
-                # 'pi_half_amplitude': 0.0744701522625286,
+                # "pi_amplitude": 0.07097*2,
+                # 'pi_half_amplitude': 0.0704701522625286,
             }, 
             # "q5_xy": {
             #     "pi_half_amplitude": 0.0565,
@@ -53,7 +53,7 @@ class multiplexed_configuation_class:
             },
             "q3_re": {
                 # "amplitude": 0.0020826678827023694,
-                # "IF": 1.5658*1e8,
+                # "IF": (1.565776e+08 + 1.568330e+08)/2,
                 # 'readout_threshold': -0.003,
             },
             # "q5_rr": {
@@ -107,9 +107,9 @@ class multiplexed_configuation_class:
         # OPX configuration #
         #####################
         # CW pulse parameter
-        self.const_len = 1000
+        self.const_len = 10000
         const_len = self.const_len
-        self.const_amp = 125 * u.mV
+        self.const_amp = 0.5 #125 * u.mV
         const_amp = self.const_amp
 
         ########
@@ -135,9 +135,9 @@ class multiplexed_configuation_class:
         self.PI_SIGMA = PI_LENGTH / 5
         PI_SIGMA = self.PI_SIGMA
 
-        self.qubit_octave_gain = 2 #6 before 2/11/2025 11:45am
+        self.qubit_octave_gain = 6 #6 before 2/11/2025 11:45am  # 2 before 4pm on 2/17
         qubit_octave_gain = self.qubit_octave_gain
-        self.amplitude_scaling = 1.5 #0.5 before 2/11/2025 11:45am
+        self.amplitude_scaling = 0.5 #0.5 before 2/11/2025 11:45am  # 1.5 before 4pm on 2/17
         amplitude_scaling = self.amplitude_scaling
 
         self.MULTIPLEX_DRIVE_CONSTANTS = {
@@ -352,7 +352,7 @@ class multiplexed_configuation_class:
         self.RL_CONSTANTS = {
             "rl1": {
                 "LO": 7.0 * u.GHz,
-                "RESONATORS": ["q1_rr", "q2_rr", "q3_rr", "q4_rr", "q5_rr", "q6_rr", "q3_re"],
+                "RESONATORS": ["q1_rr", "q2_rr", "q3_rr", "q4_rr", "q5_rr", "q6_rr", "q3_re"], #, "q3_3r"],
                 "TOF": 24 + 272,
                 "rl_con": "con1",
                 "delay": 0,
@@ -447,7 +447,19 @@ class multiplexed_configuation_class:
                 "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
                 "midcircuit_ge_threshold": 0.0,
                 "use_opt_readout": False,
-            },
+            },            
+            # "q3_3r": {
+            #     "amplitude": 0.002036230131150238,
+            #     "readout_length": 7.840000e+03,
+            #     "midcircuit_amplitude": 0.2238, 
+            #     "mc_readout_length": 3000,
+            #     "IF": 1.568350e+08 -339195,     
+            #     "rotation_angle": (218.2 / 180) * np.pi,
+            #     "ge_threshold": 1.1813225-5.593e-04,
+            #     "midcircuit_rotation_angle": (0.0 / 180) * np.pi,
+            #     "midcircuit_ge_threshold": 0.0,
+            #     "use_opt_readout": False,
+            # },
         }
         RR_CONSTANTS = self.RR_CONSTANTS
 
@@ -475,6 +487,36 @@ class multiplexed_configuation_class:
                                 ]['calibration_value'].values[0]
                         except Exception as e:
                             print(e)
+            # repeat for special tri-state readout resonator
+            # qubit_key = 'q3_ef'
+            # for param in UPDATEABLE_PARAMETER_NAMES:
+            #     if SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] == 'IF':
+            #         # Due to overlap in names for qubit and resonator, we need to be specific
+            #         ef_freq = calibration_dataframe.loc[
+            #                 (calibration_dataframe.qubit_name == qubit_key) &
+            #                 (calibration_dataframe.calibration_parameter_name == 'readout_frequency')
+            #             ]['calibration_value'].values[0]
+            #         xy_freq = calibration_dataframe.loc[
+            #             (calibration_dataframe.qubit_name == 'q3_xy') &
+            #             (calibration_dataframe.calibration_parameter_name == 'readout_frequency')
+            #         ]['calibration_value'].values[0]
+            #         RR_CONSTANTS["q3_3r"]['IF'] = (ef_freq+ xy_freq)/2
+
+            #     elif SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] == 'amplitude':
+            #         RR_CONSTANTS["q3_3r"]['amplitude'] = \
+            #             calibration_dataframe.loc[
+            #                 (calibration_dataframe.qubit_name == qubit_key) &
+            #                 (calibration_dataframe.calibration_parameter_name == 'tri_readout_amplitude')
+            #             ]['calibration_value'].values[0]
+            #     elif SEARCH_PARAMETER_KEY_CORRESPONDENCE[param] in constants.keys():
+            #         try:
+            #             RR_CONSTANTS['q3_re'][SEARCH_PARAMETER_KEY_CORRESPONDENCE[param]] = \
+            #                 calibration_dataframe.loc[
+            #                     (calibration_dataframe.qubit_name == qubit_key) &
+            #                     (calibration_dataframe.calibration_parameter_name == param)
+            #                 ]['calibration_value'].values[0]
+            #         except Exception as e:
+            #             print(e)
             self.RR_CONSTANTS = RR_CONSTANTS  # rewrite instance variable
             print('RR_CONSTANTS pulled from calibration_database.pkl')
         if use_override_values:

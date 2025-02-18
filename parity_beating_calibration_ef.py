@@ -330,23 +330,23 @@ class parity_ramsey:
             last_index += program_length
             
 
-            cis = wilson_score_interval(P_T2star, self.n_avg_per_job*self.n_rounds, z=1)
-            P_T2star_err = errorbars_from_intervals(P_T2star, cis)
-            cis = wilson_score_interval(P_T1, self.n_avg_per_job*self.n_rounds, z=1)
-            P_T1_err = errorbars_from_intervals(P_T1, cis)
+        cis = wilson_score_interval(P_T2star, self.n_avg_per_job*self.n_rounds, z=1)
+        P_T2star_err = errorbars_from_intervals(P_T2star, cis)
+        cis = wilson_score_interval(P_T1, self.n_avg_per_job*self.n_rounds, z=1)
+        P_T1_err = errorbars_from_intervals(P_T1, cis)
 
-            self.data_dict[resonator].update(
-                {
-                    'P_T2star': P_T2star,
-                    'P_T2star_err': P_T2star_err,
-                    'I_T2star': I_T2star,
-                    'Q_T2star': Q_T2star,
-                    'P_T1': P_T1,
-                    'P_T1_err': P_T1_err,
-                    'I_T1': I_T1,
-                    'Q_T1': Q_T1,
-                }
-            )
+        self.data_dict[resonator].update(
+            {
+                'P_T2star': P_T2star,
+                'P_T2star_err': P_T2star_err,
+                'I_T2star': I_T2star,
+                'Q_T2star': Q_T2star,
+                'P_T1': P_T1,
+                'P_T1_err': P_T1_err,
+                'I_T1': I_T1,
+                'Q_T1': Q_T1,
+            }
+        )
 
         self.fit_parity_beat()
 

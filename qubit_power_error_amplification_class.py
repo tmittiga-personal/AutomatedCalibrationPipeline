@@ -427,12 +427,12 @@ class Power_error_amplification:
 
 if __name__ == "__main__":
     pea = Power_error_amplification(
-        qubit = "q3_xy",
-        parameter_name = 'pi_half_', #half_
+        qubit = "q3_ef",
+        parameter_name = 'pi_', #half_
     )
     pea.power_rabi_pulse(
         a_min = 0.5, #0.75
-        a_max = 2.1, #1.25,
+        a_max = 1., #1.25,
         nb_pulse_step=4,
         # simulate=True,
     )

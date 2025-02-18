@@ -30,13 +30,14 @@ from copy import deepcopy
 
 OPTIMIZED_READOUT = False
 READOUT_TYPE = 'rotated'
-SEARCH_FIDELITY_THRESHOLD = 99
+SEARCH_FIDELITY_THRESHOLD = 95
 MAX_ITERATIONS = 10
+PERMITTED_RESONATORS = ['q3_re']
 
-def readout_amplitude_binary_search(
+def tri_readout_amplitude_binary_search(
     qubit,
     resonator,
-    i_attempt,
+    i_attempt = 0,
     n_runs = 10_000,
 ):
     mc = create_multiplexed_configuration()
@@ -44,7 +45,7 @@ def readout_amplitude_binary_search(
     if i_attempt > 0: # and qubit[-2:]=='ef':
         df = pull_latest_n_calibrated_values(
             qubits = [qubit],
-            search_parameter_names = ['readout_amplitude'],
+            search_parameter_names = ['tri_readout_amplitude'],
             n_latest = i_attempt,
             all_attempts = True,
         )
@@ -53,7 +54,22 @@ def readout_amplitude_binary_search(
             if df['miscellaneous'].iloc[-1*(ii+1)]['results_dict']['improved']:
                 initial_amplitude = df['calibration_value'].iloc[-1*(ii+1)]
                 break
+    assert resonator in PERMITTED_RESONATORS, f'Resonator {resonator} must be in {PERMITTED_RESONATORS}'
 
+    df = pull_latest_n_calibrated_values(
+        qubits = ['q3_xy'],
+        search_parameter_names = ['readout_frequency'],
+        n_latest = 1,
+    )
+    rfrr = df['calibration_value'].values[0]
+    df = pull_latest_n_calibrated_values(
+        qubits = ['q3_ef'],
+        search_parameter_names = ['readout_frequency'],
+        n_latest = 1,
+    )
+    rfre = df['calibration_value'].values[0]
+
+    new_freq = (rfrr + rfre)/2
 
     ###################
     # The QUA program #
@@ -66,7 +82,8 @@ def readout_amplitude_binary_search(
         "qubit_LO": mc.MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
         "qubit_IF": mc.QUBIT_CONSTANTS[qubit]["IF"],
         "ge_threshold": mc.RR_CONSTANTS[resonator]["ge_threshold"],
-        "rotation_angle": mc.RR_CONSTANTS[resonator]["rotation_angle"]
+        "rotation_angle": mc.RR_CONSTANTS[resonator]["rotation_angle"],
+        'resonator_freq': new_freq,
     }
 
     results_dict = {
@@ -85,13 +102,18 @@ def readout_amplitude_binary_search(
         Q_e = declare(fixed)
         I_e_st = declare_stream()
         Q_e_st = declare_stream()
+        I_f = declare(fixed)
+        Q_f = declare(fixed)
+        I_f_st = declare_stream()
+        Q_f_st = declare_stream()
 
         with for_(n, 0, n < n_runs, n + 1):
-            if resonator[-2:] == 're':
-                # If this is a e-f qubit
-                # State prep into e
-                play("x180", qubit.replace('ef','xy'))
-                align()
+            #################
+            ### measure g ###
+            #################
+            align()
+            update_frequency(resonator, new_freq)
+            wait(100, resonator)
 
             if OPTIMIZED_READOUT:
                 measure(
@@ -114,19 +136,16 @@ def readout_amplitude_binary_search(
             # Save the 'I' & 'Q' quadratures to their respective streams for the ground state
             save(I_g, I_g_st)
             save(Q_g, Q_g_st)
+            align()
 
-            align()  # global align
-            # Play the x180 gate to put the qubit in the excited state
+            #################
+            ### measure e ###
+            #################
 
-            if resonator[-2:] == 're':
-                # If this is a e-f qubit
-                # State prep into e
-                play("x180", qubit.replace('ef','xy'))
-                align()
-            play("x180", qubit)
-            # Align the two elements to measure after playing the qubit pulse.
-            align(qubit, resonator)
-            # Measure the state of the resonator
+            # State prep into e
+            play("x180", qubit.replace('ef','xy'))
+            align()
+
             if OPTIMIZED_READOUT:
                 measure(
                     f"readout",
@@ -143,12 +162,47 @@ def readout_amplitude_binary_search(
                     dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_e),
                     dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_e),
                 )
+            # Wait for the qubit to decay to the ground state in the case of measurement induced transitions
+            wait(mc.thermalization_time * mc.u.ns, resonator)
+            # Save the 'I' & 'Q' quadratures to their respective streams for the e state
+            save(I_e, I_e_st)
+            save(Q_e, Q_e_st)
+
+            align()  # global align
+            
+            #################
+            ### measure f ###
+            #################
+
+            # State prep into e
+            play("x180", qubit.replace('ef','xy'))
+            align()
+            play("x180", qubit)
+            # Align the two elements to measure after playing the qubit pulse.
+            align(qubit, resonator)
+            # Measure the state of the resonator
+            if OPTIMIZED_READOUT:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_f),
+                    dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_f),
+                )
+            else:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_f),
+                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_f),
+                )
 
             # Wait for the qubit to decay to the ground state
             wait(mc.thermalization_time * mc.u.ns, resonator)
             # Save the 'I' & 'Q' quadratures to their respective streams for the excited state
-            save(I_e, I_e_st)
-            save(Q_e, Q_e_st)
+            save(I_f, I_f_st)
+            save(Q_f, Q_f_st)
 
         with stream_processing():
             # Save all streamed points for plotting the IQ blobs
@@ -156,6 +210,8 @@ def readout_amplitude_binary_search(
             Q_g_st.save_all("Q_g")
             I_e_st.save_all("I_e")
             Q_e_st.save_all("Q_e")
+            I_f_st.save_all("I_f")
+            Q_f_st.save_all("Q_f")
 
     #####################################
     #  Open Communication with the QOP  #
@@ -176,8 +232,8 @@ def readout_amplitude_binary_search(
     amplitude_scale = 1
     still_testing = True
     best_amplitude = initial_amplitude
-    best_fidelity = 0
-    first_valid_fidelity = 0
+    best_hm = 0
+    first_valid_hm = 0
     first_valid_iteration = 0
     best_iteration = 0
     # to ensure we don't ring around the optimum, decrease changes to the amplitude over time
@@ -202,12 +258,23 @@ def readout_amplitude_binary_search(
         Qg = res_handles.get("Q_g").fetch_all()["value"]
         Ie = res_handles.get("I_e").fetch_all()["value"]
         Qe = res_handles.get("Q_e").fetch_all()["value"]
-        # Plot the IQ blobs, rotate them to get the separation along the 'I' quadrature, estimate a threshold between them
-        # for state discrimination and derive the fidelity matrix
-        angle, threshold, fidelity, gg, ge, eg, ee, fig = two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=False)
+        If = res_handles.get("I_f").fetch_all()["value"]
+        Qf = res_handles.get("Q_f").fetch_all()["value"]
+        # For 3 state discrimination, we only care about the three states being separated by as much as possible, without adding additional lobes
+        # Find distances
+        d_ge = np.sqrt( (np.mean(Ie)-np.mean(Ig))**2 +  (np.mean(Qe)-np.mean(Qg))**2 )
+        d_gf = np.sqrt( (np.mean(If)-np.mean(Ig))**2 +  (np.mean(Qf)-np.mean(Qg))**2 )
+        d_ef = np.sqrt( (np.mean(Ie)-np.mean(If))**2 +  (np.mean(Qe)-np.mean(Qf))**2 )
 
-        outlier_count_g, outliers_g, fig_g = cluster_deterimination(Ig, Qg)
-        outlier_count_e, outliers_e, fig_e = cluster_deterimination(Ie, Qe)
+        # maximize the harmonic mean of the three distances to try to reduce the possibility of minimizing a distance
+        hm = 3*(1/d_ge + 1/d_gf + 1/d_ef)**-1
+
+        outlier_count_g, outliers_g, fig_g, stds_g = cluster_deterimination(Ig, Qg)
+        outlier_count_e, outliers_e, fig_e, stds_e = cluster_deterimination(Ie, Qe)
+        outlier_count_f, outliers_f, fig_f, stds_f = cluster_deterimination(If, Qf)
+        std_g = np.mean(stds_g)
+        std_e = np.mean(stds_e)
+        std_f = np.mean(stds_f)
         
         #########################################
         # The two_state_discriminator gives us the rotation angle which makes it such that all of the information will be in
@@ -220,42 +287,51 @@ def readout_amplitude_binary_search(
         IQ_blobs_data[f"Q_g_{iteration}"] = Qg
         IQ_blobs_data[f"I_e_{iteration}"] = Ie
         IQ_blobs_data[f"Q_e_{iteration}"] = Qe
+        IQ_blobs_data[f"I_f_{iteration}"] = If
+        IQ_blobs_data[f"Q_f_{iteration}"] = Qf
+        # Find thresholding parameters
+        avg_f, fidelity_m, fig_trisect, vertical_ordering, threshold_funcs = fidelity_3_state_discrimination(IQ_blobs_data, iteration)   
 
-        IQ_blobs_data[f"figure_IQ_{iteration}"] = fig
         IQ_blobs_data[f"figure_g_{iteration}"] = fig_g
         IQ_blobs_data[f"figure_e_{iteration}"] = fig_e
+        IQ_blobs_data[f"figure_f_{iteration}"] = fig_f
+        IQ_blobs_data[f"figure_trisect_{iteration}"] = fig_trisect
+
 
         results_dict[READOUT_TYPE][iteration] = {
-            "fidelity": fidelity,
-            "angle": np.mod(angle + mc.RR_CONSTANTS[resonator]["rotation_angle"], 2*np.pi),  # Update angle
-            "threshold": threshold,
+            "harmonic_mean_distance": hm,
             'ground_outliers': outliers_g,
             'excited_outliers': outliers_e,
+            'fstate_outliers': outliers_f,
             'amplitude': initial_amplitude*amplitude_scale,
+            'avg_fidelity': avg_f,
+            'fidelity_matrix': fidelity_m,
+            'vertical_ordering': vertical_ordering,
+            'threshold_funcs': threshold_funcs,
         }
         plt.close()
-        
         # determine quality of results
-        high_enough_fidelity = fidelity > SEARCH_FIDELITY_THRESHOLD
-        too_many_outliers = outlier_count_e > 1 or outlier_count_g > 1
+        # If 
+        high_enough_distances = d_ef > 2*(std_e + std_f) and d_ge > 2*(std_e + std_g) and d_gf > 2*(std_g + std_f)
+        too_many_outliers = outlier_count_e > 1 or outlier_count_g > 1 or outlier_count_f > 1
         
-        if fidelity > best_fidelity and not too_many_outliers:
+        if hm > best_hm and not too_many_outliers:
             best_amplitude = initial_amplitude*amplitude_scale
-            best_fidelity = fidelity
+            best_hm = hm
             best_iteration = iteration
 
-            if first_valid_fidelity == 0:
-                first_valid_fidelity = fidelity
+            if first_valid_hm == 0:
+                first_valid_hm = hm
                 first_valid_iteration = iteration
-            print(f'Iteration {iteration}, New Best Amplitude: {best_amplitude}, Fidelity: {best_fidelity}')
+            print(f'Iteration {iteration}, New Best Amplitude: {best_amplitude}, Harmonic Mean Distance: {best_hm}')
 
-        if high_enough_fidelity and not too_many_outliers:
+        if high_enough_distances and not too_many_outliers:
             # We've achieved our goal. terminate
             still_testing = False
         else:
-            if not high_enough_fidelity and not too_many_outliers:
+            if not high_enough_distances and not too_many_outliers:
                 amplitude_scale *= 0.5*ring_down[iteration]+1  # exponentially reduce scaling from 1.5 to 1
-            elif high_enough_fidelity and too_many_outliers:
+            elif high_enough_distances and too_many_outliers:
                 amplitude_scale *= (1-ring_down[iteration])*0.5+0.5  # exponentially increase scaling from 0.5 to 1
             else:
                 # fidelity too low and too many outliers, we prefer to get rid of outliers
@@ -265,15 +341,134 @@ def readout_amplitude_binary_search(
         iteration += 1
     # Check for improvement 
     improved = False
-    if first_valid_iteration > 0 or best_fidelity > first_valid_fidelity:
+    if first_valid_iteration > 0 or best_hm > first_valid_hm:
         # Wend from an amplitude that produced too many outliers, to a valid amplitude        
         # Or went from a valid amplitude to a better amplitude
-        improved = True
+        improved = True 
+ 
     results_dict[READOUT_TYPE]['best'] = results_dict[READOUT_TYPE][best_iteration]
     results_dict['improved'] = improved
-    data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_resonator_amplitude_binary_search")
+    IQ_blobs_data['results_dict'] = results_dict        
+    data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_3statediscrimination_amplitude_binary_search")
     results_dict['data_folder'] = data_folder
     return results_dict
+
+
+def fidelity_3_state_discrimination(file_contents, iteration):
+    I_g = file_contents[f'I_g_{iteration}']
+    I_e = file_contents[f'I_e_{iteration}']
+    I_f = file_contents[f'I_f_{iteration}']
+    Q_g = file_contents[f'Q_g_{iteration}']
+    Q_e = file_contents[f'Q_e_{iteration}']
+    Q_f = file_contents[f'Q_f_{iteration}']
+
+    # Find location of each blob
+    loc_g = [np.mean(I_g), np.mean(Q_g)]
+    loc_e = [np.mean(I_e), np.mean(Q_e)]
+    loc_f = [np.mean(I_f), np.mean(Q_f)]
+
+    # Figure out the ordering of the states in IQ space
+    ### Assuming a roughly EQUILATERAL triangular arrangement of the states 
+    ### (and that the states will never be exactly on top/bottom of each other)
+    ### There are only 4 distinguishable arrangements:
+    ### 1&2) top state is leftmost/rightmost state
+    ### 3&4) bottom state is leftmost/rightmost
+
+    origI = np.array([loc_g[0], loc_e[0], loc_f[0]])
+    origQ = np.array([loc_g[1], loc_e[1], loc_f[1]])
+    bottom_sorted_indices = np.argsort(origQ)
+    left_sorted_indices = np.argsort(origI)
+    bottomQ = origQ[bottom_sorted_indices]
+    leftI= origI[left_sorted_indices]
+
+    # dict to convert between gef and top/mid/bottom
+    simple_ind = np.array([0,1,2])
+    vertical_ordering = {
+        'g': simple_ind[bottom_sorted_indices==0][0],
+        'e': simple_ind[bottom_sorted_indices==1][0], 
+        'f': simple_ind[bottom_sorted_indices==2][0],
+    }
+
+    # Determine which arrangement we're in
+    if left_sorted_indices[0] == bottom_sorted_indices[-1]:
+        # if the topmost state is also the leftmost state
+        loc_t = [leftI[0], bottomQ[2]]
+        loc_m = [leftI[2], bottomQ[1]]
+        loc_b = [leftI[1], bottomQ[0]]
+    elif left_sorted_indices[-1] == bottom_sorted_indices[-1]:
+        # if the topmost state is also the rightmost state
+        loc_t = [leftI[2], bottomQ[2]]
+        loc_m = [leftI[0], bottomQ[1]]
+        loc_b = [leftI[1], bottomQ[0]]
+    elif left_sorted_indices[0] == bottom_sorted_indices[0]:
+        # if the bottommost state is also the leftmost state
+        loc_t = [leftI[1], bottomQ[2]]
+        loc_m = [leftI[2], bottomQ[1]]
+        loc_b = [leftI[0], bottomQ[0]]
+    elif left_sorted_indices[-1] == bottom_sorted_indices[0]:
+        # if the bottommost state is also the rightmost state
+        loc_t = [leftI[1], bottomQ[2]]
+        loc_m = [leftI[0], bottomQ[1]]
+        loc_b = [leftI[2], bottomQ[0]]
+
+    # create lines passing through the center of each blob and tri-secting IQ space optimally
+    mtm = -1*(loc_t[0] - loc_m[0])/(loc_t[1] - loc_m[1])
+    mmb = -1*(loc_m[0] - loc_b[0])/(loc_m[1] - loc_b[1])
+    mtb = -1*(loc_t[0] - loc_b[0])/(loc_t[1] - loc_b[1])
+
+    t_func = lambda x: mmb*(x-loc_t[0]) + loc_t[1]
+    m_func = lambda x: mtb*(x-loc_m[0]) + loc_m[1]
+    b_func = lambda x: mtm*(x-loc_b[0]) + loc_b[1]
+    #store for use by experiments
+    funcs = [b_func, m_func, t_func]
+
+    read_t_i = []
+    read_t_q = []
+    read_m_i = []
+    read_m_q = []
+    read_b_i = []
+    read_b_q = []
+    # parse
+    fidelity_matrix = np.zeros((3,3))
+
+    ### ONlY true for roughly equilateral triangle
+    for i_state, (I_s, Q_s) in enumerate(zip([I_g, I_e, I_f], [Q_g, Q_e, Q_f])):
+        num_points = len(I_s)
+        t_count = 0
+        m_count = 0
+        b_count = 0
+        for i, q in zip(I_s, Q_s):
+            if q > m_func(i) and q > b_func(i):
+                read_t_i.append(i)
+                read_t_q.append(q)
+                t_count += 1
+            elif q > t_func(i) and q < b_func(i):
+                read_m_i.append(i)
+                read_m_q.append(q)
+                m_count += 1
+            elif q < t_func(i) and q < m_func(i):
+                read_b_i.append(i)
+                read_b_q.append(q)
+                b_count += 1
+        for i_tb, count in enumerate([b_count, m_count, t_count]):
+
+            if i_tb == vertical_ordering['g']:
+                second_index = 0
+            elif i_tb == vertical_ordering['e']:
+                second_index = 1
+            elif i_tb == vertical_ordering['f']:
+                second_index = 2
+                
+            fidelity_matrix[i_state][second_index] = count/num_points
+
+    fig_trisect = plt.figure(figsize=(7,7))
+    plt.plot(read_t_i, read_t_q, 'r.', markersize=2)
+    plt.plot(read_m_i, read_m_q, 'b.', markersize=2)
+    plt.plot(read_b_i, read_b_q, 'g.', markersize=2)
+
+    print(fidelity_matrix)
+    avg_f = (fidelity_matrix[0][0] + fidelity_matrix[1][1] + fidelity_matrix[2][2])/3
+    return avg_f, fidelity_matrix, fig_trisect, vertical_ordering, funcs
 
 
 def cluster_deterimination(
@@ -340,6 +535,7 @@ def cluster_deterimination(
         # Fit the function to the histogram data
         popt, _ = curve_fit(gaussian, bin_centers, hist, p0=[np.max(hist), np.mean(data), np.std(data)])
         filtered_stds.append(popt[2])
+    filtered_stds = np.array(filtered_stds)
 
     outlier_count = 0
     outliers = []
@@ -351,7 +547,7 @@ def cluster_deterimination(
             outliers.append([I_cc, Q_cc])
             outlier_count += 1
     plt.close()
-    return outlier_count, outliers, fig
+    return outlier_count, outliers, fig, filtered_stds
 
 if __name__ == "__main__":
     readout_amplitude_binary_search(

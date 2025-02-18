@@ -9,6 +9,7 @@ from IQ_blobs_comparison import IQ_blobs_comparison
 from qubit_power_error_amplification_class import Power_error_amplification
 from ramsey_w_virtual_rotation import Ramsey_w_virtual_rotation, DEFAULT_TAUS
 from readout_amplitude_binary_search import readout_amplitude_binary_search
+from readout_3statediscrimination_amplitude_binary_search import tri_readout_amplitude_binary_search
 from readout_duration_optimization import readout_duration_optimization
 from readout_frequency_optimization import readout_frequency_optimization
 from readout_weights_optimization import readout_weights_optimization
@@ -777,6 +778,91 @@ class Resonator_Amplitude_Node(Node):
         self.calibration_values = [optimal_amplitude, fidelity, angle, threshold]
         self.miscellaneous.update({'results_dict': results_dict})
         self.success_condition(fidelity, ground_outliers, excited_outliers)
+
+
+
+
+class Tri_Resonator_Amplitude_Node(Node):
+    def __init__(
+        self,  
+        calibration_parameter_name: str,
+        qubits_to_calibrate: List[str],
+        refresh_time: float,
+        expiration_time: float,
+        retry_time: float,
+        fresh: bool = False,
+        n_avg: int = 10000,
+    ):
+        super().__init__(
+            calibration_parameter_name,
+            qubits_to_calibrate,
+            refresh_time,
+            expiration_time,
+            retry_time,
+            fresh,
+        )
+        self.n_avg = n_avg
+
+
+    def success_condition(
+            self, 
+            fidelity: float, 
+            ground_outliers: list, 
+            excited_outliers: list,
+            fstate_outliers: list,
+        ):
+        self.calibration_success = False
+
+        if self.current_qubit[-2:] == 'ef':
+            # standard for e-f qubits is lower
+            fid_thres = EF_IQ_THRESHOLD
+        else:
+            fid_thres = IQ_THRESHOLD
+
+        if (fidelity > fid_thres) and (len(ground_outliers) < 2) and (len(excited_outliers) < 2) and (len(fstate_outliers) < 2):
+            # If surpass threshold, success
+            self.calibration_success = True 
+
+        if self.i_attempt == MAX_ATTEMPTS - 1: #and self.current_qubit[-2:] == 'ef': # Final attempt
+            # If we saw improvement over the course of the attempts, call it a success
+            df = self.loaded_database
+            dfq = df.loc[
+                (df.calibration_parameter_name == 'readout_amplitude') &
+                (df.qubit_name == self.current_qubit)
+            ].iloc[-1*self.i_attempt:]
+            for ii in range(self.i_attempt):
+                if dfq['miscellaneous'].iloc[-1*(ii+1)]['results_dict']['improved']:
+                    # If one of the attempts improved, it is preserved as the initial_amplitude in the next
+                    # attempt, which is set as the best amplitude in a failed attempt.
+                    self.calibration_success = True 
+                    break
+            
+
+
+        print(f'calibration success: {self.calibration_success}')
+
+
+    def calibration_measurement(self):
+        """
+        NOTE: self.calibration_success MUST be the last value set in the calbiration_measurement method
+        because the while loop terminates when it becomes True.
+        """
+
+        results_dict = tri_readout_amplitude_binary_search(
+            qubit = self.current_qubit,
+            resonator = 'q3_3r',
+            i_attempt = self.i_attempt,
+        )
+        data_folder = results_dict['data_folder']
+        fidelity = results_dict['rotated']['best']['avg_fidelity']
+        optimal_amplitude = results_dict['rotated']['best']['amplitude']
+        ground_outliers = results_dict['rotated']['best']['ground_outliers']
+        excited_outliers = results_dict['rotated']['best']['excited_outliers']
+        fstate_outliers = results_dict['rotated']['best']['fstate_outliers']
+        self.experiment_data_location = data_folder
+        self.calibration_values = [optimal_amplitude, fidelity]
+        self.miscellaneous.update({'results_dict': results_dict})
+        self.success_condition(fidelity, ground_outliers, excited_outliers, fstate_outliers)
 
 
 

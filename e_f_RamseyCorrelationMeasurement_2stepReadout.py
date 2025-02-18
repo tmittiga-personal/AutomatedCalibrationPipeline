@@ -47,17 +47,20 @@ class ef_ramseycorrelation:
         self.probe_qubit = probe_qubit
         self.state_prep_qubit = self.probe_qubit.replace('ef','xy')
         self.f_artificial = 0 * self.mc.u.kHz
-        self.n_avg = 1_500_000 #10_000  # The number of averages
+        self.n_avg = 10_000 #1_500_000 #10_000  # The number of averages
         self.program_divisions = 1
         
         self.resonator = 'q3_re'
+        self.resonatorge = 'q3_rr'
 
         # shift IF to address the higher parity state
         upper_f = self.f1 if self.f1 > self.f2 else self.f2
         self.new_IF = self.mc.QUBIT_CONSTANTS[probe_qubit]['IF'] + (self.f_art - upper_f)
         self.tau = 0.5/self.f_beat # in ns
         self.threshold = self.mc.RR_CONSTANTS[self.resonator]['ge_threshold']
+        self.thresholdge = self.mc.RR_CONSTANTS[self.resonatorge]['ge_threshold']
         self.pi_length = self.mc.QUBIT_CONSTANTS[probe_qubit]['pi_len']
+        self.ge_pi_length = self.mc.QUBIT_CONSTANTS[self.state_prep_qubit]['pi_len']
 
         self.multiplex_ramsey_data = {
             "n_avg": self.n_avg,
@@ -111,7 +114,9 @@ class ef_ramseycorrelation:
             with program() as multiplex_ramsey: #_{i_i}:
                 n = declare(int)  # QUA variable for the averaging loop
                 I_cases = declare(fixed)  # QUA variable for the measured 'I' quadrature in each case
+                I_ge = declare(fixed)  # QUA variable for the measured 'I' quadrature in each case
                 I_st = declare_stream()  # Stream for the 'I' quadrature in each case
+                I_ge_st = declare_stream()
 
                 
                 update_frequency(probe_qubit, self.new_IF)
@@ -133,6 +138,7 @@ class ef_ramseycorrelation:
                     play("x90", probe_qubit)
                     # reset_frame(probe_qubit)
                     align()
+                    # measure along ef
                     measure(
                         "readout",
                         resonator,
@@ -140,8 +146,17 @@ class ef_ramseycorrelation:
                         dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_cases),
                         timestamp_stream='measure_timestamps',
                     )
+                    align()
+                    # Measure along ge
+                    measure(
+                        "readout",
+                        self.resonatorge,
+                        None,
+                        dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_ge),
+                    )
                     # Save the 'I_e' & 'Q_e' quadratures to their respective streams
                     save(I_cases, I_st)
+                    save(I_ge, I_ge_st)
                     align()
                     ################
                     # Active reset #
@@ -150,19 +165,24 @@ class ef_ramseycorrelation:
                         play("x180", probe_qubit)
                     with else_():
                         wait(self.pi_length, probe_qubit)
-                    align(self.state_prep_qubit, probe_qubit)                        
-                    play("x180", self.state_prep_qubit)
+                    align(self.state_prep_qubit, probe_qubit)  
+                    # Only play pi on ge if the qubit is in e
+                    with if_(I_ge > self.thresholdge):                      
+                        play("x180", self.state_prep_qubit)
+                    with else_():
+                        wait(self.ge_pi_length, self.state_prep_qubit)
+
                     # wait(int(self.tau), self.state_prep_qubit),
                     # align()
                     #(faster):
                     # play("x180", "qubit", condition=I_cases > self.threshold)
                     # Wait for the qubit to decay to the ground state
-                    # wait(self.mc.thermalization_time * self.mc.u.ns, resonator)
-                    wait(150_000, resonator)
+                    wait(self.mc.thermalization_time * self.mc.u.ns, resonator)
 
                 with stream_processing():
                     # Save all streamed points for plotting the IQ blobs
                     I_st.save_all("I")
+                    I_ge_st.save_all("Ige")
 
             # exec(program_code)
             # eval(f'programs.append(multiplex_ramsey_{i_i})')
@@ -229,11 +249,13 @@ class ef_ramseycorrelation:
             res_handles.wait_for_all_values()
             measure_timestamps = res_handles.get('measure_timestamps').fetch_all()
             I = res_handles.get("I").fetch_all()
+            Ige = res_handles.get("Ige").fetch_all()
             self.program_data_dict[job.id] = {resonator: {}}
             self.program_data_dict[job.id][resonator].update(
                 {
                     'timestamps': measure_timestamps,
                     'I': I,
+                    'Ige': Ige,
                 }
             )
             job = self.qm.get_running_job() 
@@ -244,14 +266,17 @@ class ef_ramseycorrelation:
             # so no need to sort; they are already in job-order = tau-order
             if i_pd == 0:
                 I = np.array(data[resonator]['I'])
+                Ige = np.array(data[resonator]['Ige'])
                 timestamps = np.array(data[resonator]['timestamps'])
             else:
                 I = np.concatenate((I,np.array(data[resonator]['I'])))
+                Ige = np.concatenate((I,np.array(data[resonator]['Ige'])))
                 timestamps = np.concatenate((timestamps,np.array(data[resonator]['timestamps'])))
 
         self.data_dict[resonator].update(
             {
                 'I': I,
+                'Ige': Ige,
                 'timestamps': timestamps,
             }
         )
@@ -259,6 +284,7 @@ class ef_ramseycorrelation:
         # Save to file
         self.multiplex_ramsey_data["measurement_data"] = self.data_dict
         self.data_folder = self.data_handler.save_data(self.multiplex_ramsey_data, name="e_f_ramseycorrelation")
+        print('Done')
 
 
 if __name__ == "__main__":

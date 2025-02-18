@@ -30,30 +30,18 @@ from copy import deepcopy
 
 OPTIMIZED_READOUT = False
 READOUT_TYPE = 'rotated'
-SEARCH_FIDELITY_THRESHOLD = 99
+SEARCH_FIDELITY_THRESHOLD = 95
 MAX_ITERATIONS = 10
+PERMITTED_RESONATORS = ['q3_re']
 
 def readout_amplitude_binary_search(
     qubit,
     resonator,
-    i_attempt,
     n_runs = 10_000,
 ):
     mc = create_multiplexed_configuration()
     initial_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]
-    if i_attempt > 0: # and qubit[-2:]=='ef':
-        df = pull_latest_n_calibrated_values(
-            qubits = [qubit],
-            search_parameter_names = ['readout_amplitude'],
-            n_latest = i_attempt,
-            all_attempts = True,
-        )
-        # Loop over this round of attempts to calbirate and take an improved values
-        for ii in range(i_attempt):
-            if df['miscellaneous'].iloc[-1*(ii+1)]['results_dict']['improved']:
-                initial_amplitude = df['calibration_value'].iloc[-1*(ii+1)]
-                break
-
+    assert resonator in PERMITTED_RESONATORS, f'Resonator {resonator} must be in {PERMITTED_RESONATORS}'
 
     ###################
     # The QUA program #
@@ -85,13 +73,16 @@ def readout_amplitude_binary_search(
         Q_e = declare(fixed)
         I_e_st = declare_stream()
         Q_e_st = declare_stream()
+        I_f = declare(fixed)
+        Q_f = declare(fixed)
+        I_f_st = declare_stream()
+        Q_f_st = declare_stream()
 
         with for_(n, 0, n < n_runs, n + 1):
-            if resonator[-2:] == 're':
-                # If this is a e-f qubit
-                # State prep into e
-                play("x180", qubit.replace('ef','xy'))
-                align()
+            #################
+            ### measure g ###
+            #################
+            align()
 
             if OPTIMIZED_READOUT:
                 measure(
@@ -114,19 +105,16 @@ def readout_amplitude_binary_search(
             # Save the 'I' & 'Q' quadratures to their respective streams for the ground state
             save(I_g, I_g_st)
             save(Q_g, Q_g_st)
+            align()
 
-            align()  # global align
-            # Play the x180 gate to put the qubit in the excited state
+            #################
+            ### measure e ###
+            #################
 
-            if resonator[-2:] == 're':
-                # If this is a e-f qubit
-                # State prep into e
-                play("x180", qubit.replace('ef','xy'))
-                align()
-            play("x180", qubit)
-            # Align the two elements to measure after playing the qubit pulse.
-            align(qubit, resonator)
-            # Measure the state of the resonator
+            # State prep into e
+            play("x180", qubit.replace('ef','xy'))
+            align()
+
             if OPTIMIZED_READOUT:
                 measure(
                     f"readout",
@@ -143,12 +131,47 @@ def readout_amplitude_binary_search(
                     dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_e),
                     dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_e),
                 )
+            # Wait for the qubit to decay to the ground state in the case of measurement induced transitions
+            wait(mc.thermalization_time * mc.u.ns, resonator)
+            # Save the 'I' & 'Q' quadratures to their respective streams for the e state
+            save(I_e, I_e_st)
+            save(Q_e, Q_e_st)
+
+            align()  # global align
+            
+            #################
+            ### measure f ###
+            #################
+
+            # State prep into e
+            play("x180", qubit.replace('ef','xy'))
+            align()
+            play("x180", qubit)
+            # Align the two elements to measure after playing the qubit pulse.
+            align(qubit, resonator)
+            # Measure the state of the resonator
+            if OPTIMIZED_READOUT:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_f),
+                    dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_f),
+                )
+            else:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_f),
+                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_f),
+                )
 
             # Wait for the qubit to decay to the ground state
             wait(mc.thermalization_time * mc.u.ns, resonator)
             # Save the 'I' & 'Q' quadratures to their respective streams for the excited state
-            save(I_e, I_e_st)
-            save(Q_e, Q_e_st)
+            save(I_f, I_f_st)
+            save(Q_f, Q_f_st)
 
         with stream_processing():
             # Save all streamed points for plotting the IQ blobs
@@ -156,6 +179,8 @@ def readout_amplitude_binary_search(
             Q_g_st.save_all("Q_g")
             I_e_st.save_all("I_e")
             Q_e_st.save_all("Q_e")
+            I_f_st.save_all("I_f")
+            Q_f_st.save_all("Q_f")
 
     #####################################
     #  Open Communication with the QOP  #
@@ -183,95 +208,68 @@ def readout_amplitude_binary_search(
     # to ensure we don't ring around the optimum, decrease changes to the amplitude over time
     ring_down = np.exp(-np.array(range(0,MAX_ITERATIONS))/(MAX_ITERATIONS/5))
 
-    while still_testing and iteration < MAX_ITERATIONS:
-        # modify readout amplitude
-        config_copy["waveforms"][f"readout_wf_{resonator}"]={
-            "type": "constant", 
-            "sample": initial_amplitude*amplitude_scale
-        }
-        # Open the quantum machine
-        qm = qmm.open_qm(config_copy)
-        # Send the QUA program to the OPX, which compiles and executes it
-        job = qm.execute(IQ_blobs)
-        # Creates a result handle to fetch data from the OPX
-        res_handles = job.result_handles
-        # Waits (blocks the Python console) until all results have been acquired
-        res_handles.wait_for_all_values()
-        # Fetch the 'I' & 'Q' points for the qubit in the ground and excited states
-        Ig = res_handles.get("I_g").fetch_all()["value"]
-        Qg = res_handles.get("Q_g").fetch_all()["value"]
-        Ie = res_handles.get("I_e").fetch_all()["value"]
-        Qe = res_handles.get("Q_e").fetch_all()["value"]
-        # Plot the IQ blobs, rotate them to get the separation along the 'I' quadrature, estimate a threshold between them
-        # for state discrimination and derive the fidelity matrix
-        angle, threshold, fidelity, gg, ge, eg, ee, fig = two_state_discriminator_plot(Ig, Qg, Ie, Qe, b_print=False)
+    # modify readout amplitude
+    config_copy["waveforms"][f"readout_wf_{resonator}"]={
+        "type": "constant", 
+        "sample": initial_amplitude*amplitude_scale
+    }
+    # Open the quantum machine
+    qm = qmm.open_qm(config_copy)
+    # Send the QUA program to the OPX, which compiles and executes it
+    job = qm.execute(IQ_blobs)
+    # Creates a result handle to fetch data from the OPX
+    res_handles = job.result_handles
+    # Waits (blocks the Python console) until all results have been acquired
+    res_handles.wait_for_all_values()
+    # Fetch the 'I' & 'Q' points for the qubit in the ground and excited states
+    Ig = res_handles.get("I_g").fetch_all()["value"]
+    Qg = res_handles.get("Q_g").fetch_all()["value"]
+    Ie = res_handles.get("I_e").fetch_all()["value"]
+    Qe = res_handles.get("Q_e").fetch_all()["value"]
+    If = res_handles.get("I_f").fetch_all()["value"]
+    Qf = res_handles.get("Q_f").fetch_all()["value"]
+    # Plot the IQ blobs, rotate them to get the separation along the 'I' quadrature, estimate a threshold between them
+    # for state discrimination and derive the fidelity matrix
+    angle, thresholdge, fidelity1, gg, ge, eg, ee, thresholdef, fidelity2, ee2, ef, fe, ff, fig = three_state_discriminator_plot(Ig, Qg, Ie, Qe, If, Qf, b_print=False)
 
-        outlier_count_g, outliers_g, fig_g = cluster_deterimination(Ig, Qg)
-        outlier_count_e, outliers_e, fig_e = cluster_deterimination(Ie, Qe)
+    outlier_count_g, outliers_g, fig_g = cluster_deterimination(Ig, Qg)
+    outlier_count_e, outliers_e, fig_e = cluster_deterimination(Ie, Qe)
+    outlier_count_f, outliers_f, fig_f = cluster_deterimination(If, Qf)
+    
+    #########################################
+    # The two_state_discriminator gives us the rotation angle which makes it such that all of the information will be in
+    # the I axis. This is being done by setting the `rotation_angle` parameter in the configuration.
+    # See this for more information: https://qm-docs.qualang.io/guides/demod#rotating-the-iq-plane
+    # Once we do this, we can perform active reset using:
+    #########################################
+    
+    IQ_blobs_data[f"I_g_{iteration}"] = Ig
+    IQ_blobs_data[f"Q_g_{iteration}"] = Qg
+    IQ_blobs_data[f"I_e_{iteration}"] = Ie
+    IQ_blobs_data[f"Q_e_{iteration}"] = Qe
+    IQ_blobs_data[f"I_f_{iteration}"] = If
+    IQ_blobs_data[f"Q_f_{iteration}"] = Qf
+
+    IQ_blobs_data[f"figure_IQ_{iteration}"] = fig
+    IQ_blobs_data[f"figure_g_{iteration}"] = fig_g
+    IQ_blobs_data[f"figure_e_{iteration}"] = fig_e
+    IQ_blobs_data[f"figure_f_{iteration}"] = fig_f
+
+    results_dict[READOUT_TYPE] = {
+        "fidelityge": fidelity1,
+        "fidelityef": fidelity2,
+        "angle": np.mod(angle + mc.RR_CONSTANTS[resonator]["rotation_angle"], 2*np.pi),  # Update angle
+        "thresholdge": thresholdge,
+        "thresholdef": thresholdef,
+        'ground_outliers': outliers_g,
+        'excited_outliers': outliers_e,
+        'fstate_outliers': outliers_f,
+        'amplitude': initial_amplitude*amplitude_scale,
+    }
+    plt.close()
+    IQ_blobs_data['results_dict'] = results_dict
         
-        #########################################
-        # The two_state_discriminator gives us the rotation angle which makes it such that all of the information will be in
-        # the I axis. This is being done by setting the `rotation_angle` parameter in the configuration.
-        # See this for more information: https://qm-docs.qualang.io/guides/demod#rotating-the-iq-plane
-        # Once we do this, we can perform active reset using:
-        #########################################
-        
-        IQ_blobs_data[f"I_g_{iteration}"] = Ig
-        IQ_blobs_data[f"Q_g_{iteration}"] = Qg
-        IQ_blobs_data[f"I_e_{iteration}"] = Ie
-        IQ_blobs_data[f"Q_e_{iteration}"] = Qe
-
-        IQ_blobs_data[f"figure_IQ_{iteration}"] = fig
-        IQ_blobs_data[f"figure_g_{iteration}"] = fig_g
-        IQ_blobs_data[f"figure_e_{iteration}"] = fig_e
-
-        results_dict[READOUT_TYPE][iteration] = {
-            "fidelity": fidelity,
-            "angle": np.mod(angle + mc.RR_CONSTANTS[resonator]["rotation_angle"], 2*np.pi),  # Update angle
-            "threshold": threshold,
-            'ground_outliers': outliers_g,
-            'excited_outliers': outliers_e,
-            'amplitude': initial_amplitude*amplitude_scale,
-        }
-        plt.close()
-        
-        # determine quality of results
-        high_enough_fidelity = fidelity > SEARCH_FIDELITY_THRESHOLD
-        too_many_outliers = outlier_count_e > 1 or outlier_count_g > 1
-        
-        if fidelity > best_fidelity and not too_many_outliers:
-            best_amplitude = initial_amplitude*amplitude_scale
-            best_fidelity = fidelity
-            best_iteration = iteration
-
-            if first_valid_fidelity == 0:
-                first_valid_fidelity = fidelity
-                first_valid_iteration = iteration
-            print(f'Iteration {iteration}, New Best Amplitude: {best_amplitude}, Fidelity: {best_fidelity}')
-
-        if high_enough_fidelity and not too_many_outliers:
-            # We've achieved our goal. terminate
-            still_testing = False
-        else:
-            if not high_enough_fidelity and not too_many_outliers:
-                amplitude_scale *= 0.5*ring_down[iteration]+1  # exponentially reduce scaling from 1.5 to 1
-            elif high_enough_fidelity and too_many_outliers:
-                amplitude_scale *= (1-ring_down[iteration])*0.5+0.5  # exponentially increase scaling from 0.5 to 1
-            else:
-                # fidelity too low and too many outliers, we prefer to get rid of outliers
-                amplitude_scale *= (1-ring_down[iteration])*0.5+0.5  # exponentially increase scaling from 0.5 to 1
-        
-
-        iteration += 1
-    # Check for improvement 
-    improved = False
-    if first_valid_iteration > 0 or best_fidelity > first_valid_fidelity:
-        # Wend from an amplitude that produced too many outliers, to a valid amplitude        
-        # Or went from a valid amplitude to a better amplitude
-        improved = True
-    results_dict[READOUT_TYPE]['best'] = results_dict[READOUT_TYPE][best_iteration]
-    results_dict['improved'] = improved
-    data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_resonator_amplitude_binary_search")
+    data_folder = data_handler.save_data(IQ_blobs_data, name=f"{qubit}_3statediscrimination")
     results_dict['data_folder'] = data_folder
     return results_dict
 

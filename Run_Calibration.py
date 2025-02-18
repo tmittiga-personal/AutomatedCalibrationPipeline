@@ -8,7 +8,7 @@ TODO: Use asyncio to permit running this script in the background and interleavi
 
 from calibration_nodes import *
 import time
-from e_f_RamseyCorrelationMeasurement import ef_ramseycorrelation
+from e_f_RamseyCorrelationMeasurement_2stepReadout import ef_ramseycorrelation
 
 CALIBRATION_QUBITS = ["q3_xy"] #"q3_xy", "q1_xy", 
 CALIBRATION_TIME_WINDOW = [datetime.strptime("17:00", "%H:%M").time(), datetime.strptime("17:00", "%H:%M").time()]
@@ -124,6 +124,14 @@ ef_pi_half_amplitude_node = Qubit_Amplitude_Node(
     nb_pulse_step = 4,
 )
 
+tri_resonator_amplitude_node = Resonator_Amplitude_Node(    
+    calibration_parameter_name = ['tri_readout_amplitude','tri_readout_fidelity'],
+    qubits_to_calibrate = ['q3_ef'],
+    refresh_time = 3600*3,
+    expiration_time = 3600*24,
+    retry_time = 60*5,
+)
+
 ###########
 ### RUN ###
 ###########
@@ -157,31 +165,32 @@ if __name__ == "__main__":
             
             parity_beat_node.calibrate()
 
-            df = parity_beat_node.loaded_database
-            mval = df['miscellaneous'].values[-1]
-            f1 = mval['fit_dict']['frequency1']
-            f2 = mval['fit_dict']['frequency2']
-            t2 = mval['fit_dict']['T2star']
-            fbeat = np.abs(f1-f2)*1e6
-            # If parity beat is over threshold and T2* is long enough to measure it.
-            if fbeat > 20 and t2*1e-6 > 1.2/fbeat:
-                try: 
-                # pr = ef_ramseyspinlock(
-                #     f1 = f1,     
-                #     f2 = f2,
-                #     probe_qubit = 'q3_ef',
-                # )
-                # pr.run_ef_ramseyspinlock()
+            try:
+                df = parity_beat_node.loaded_database
+                mval = df['miscellaneous'].values[-1]
+                f1 = mval['fit_dict']['frequency1']
+                f2 = mval['fit_dict']['frequency2']
+                t2 = mval['fit_dict']['T2star']
+                fbeat = np.abs(f1-f2)*1e6
+                # If parity beat is over threshold and T2* is long enough to measure it.
+                if fbeat > 20 and t2*1e-6 > 1.2/fbeat:
+                    # pr = ef_ramseyspinlock(
+                    #     f1 = f1,     
+                    #     f2 = f2,
+                    #     probe_qubit = 'q3_ef',
+                    # )
+                    # pr.run_ef_ramseyspinlock()
                     mr = ef_ramseycorrelation(
                         f1 = f1,
                         f2 = f2,
                     )
                     mr.run_ef_ramseycorrelation()
-                except:
-                    print('Failure')
-            else:
-                print(f'{fbeat=}')
-                print(f'{t2*1e-6=}')
+                else:
+                    print(f'{fbeat=}')
+                    print(f'{t2*1e-6=}')
+            
+            except:
+                print('Failure')
 
             # resonator_weights_node.calibrate()
 
