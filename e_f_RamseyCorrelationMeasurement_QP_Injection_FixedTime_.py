@@ -30,6 +30,12 @@ from qm import CompilerOptionArguments
 import peakutils
 from scipy import optimize
 
+# Assumes 2 MHz detuning. 4 points per oscillation
+DEFAULT_TAUS = np.concatenate(
+            (np.arange(4, 80_000//4 , 500//4), # 0.1 MHz  #np.arange(4, 200_000//4 , 500//4)
+            )
+        )
+
 class ef_ramseycorrelation:
     def __init__(
         self,   
@@ -37,7 +43,9 @@ class ef_ramseycorrelation:
         f2,
         f_art = 500_000,
         probe_qubit = "q3_ef",
+        evolution_times: np.typing.NDArray = DEFAULT_TAUS,
     ):
+        self.QP_wait = 120_000 # clock cycles
         # Convert to Hz from GHz
         self.f1 = f1*1e9
         self.f2 = f2*1e9
@@ -47,11 +55,14 @@ class ef_ramseycorrelation:
         self.probe_qubit = probe_qubit
         self.state_prep_qubit = self.probe_qubit.replace('ef','xy')
         self.f_artificial = 0 * self.mc.u.kHz
-        self.n_avg = 20_000 #1_500_000 #10_000  # The number of averages
+        self.n_avg = 200 #1_500_000 #10_000  # The number of averages
+        self.random_phases = np.random.random(self.n_avg)
         self.program_divisions = 1
+        self.evolution_times = evolution_times
         
         self.resonator = 'q3_re'
         self.resonatorge = 'q3_rr'
+        self.resonatorQP = 'q1_rr'
 
         # shift IF to address the higher parity state
         upper_f = self.f1 if self.f1 > self.f2 else self.f2
@@ -77,6 +88,7 @@ class ef_ramseycorrelation:
             "qubit_octave_gain": self.mc.qubit_octave_gain,
             "evolution_time": self.tau,
             'f_artificial': self.f_artificial,
+            "QP_wait (ns)": 4*self.QP_wait
         }
         
         self.precomile_muliplexed_ramsey()
@@ -108,83 +120,67 @@ class ef_ramseycorrelation:
         resonator = self.resonator
 
         programs = []
+
+        random_phases = self.random_phases
+        evolution_times = self.evolution_times
         
         for i_i in range(self.program_divisions):
             # program_code = f"""
             with program() as multiplex_ramsey: #_{i_i}:
-                n = declare(int)  # QUA variable for the averaging loop
+                random_phase = declare(fixed)  # QUA variable for the averaging loop
+                evolution = declare(int)
                 I_cases = declare(fixed)  # QUA variable for the measured 'I' quadrature in each case
-                I_ge = declare(fixed)  # QUA variable for the measured 'I' quadrature in each case
                 I_st = declare_stream()  # Stream for the 'I' quadrature in each case
-                I_ge_st = declare_stream()
 
                 
                 update_frequency(probe_qubit, self.new_IF)
                 wait(10, probe_qubit)
-                with for_(n, 0, n < self.n_avg, n + 1):        
-                    # Strict_timing ensures that the sequence will be played without gaps
-                    # with strict_timing_():   
+                with for_each_(random_phase, random_phases):
+                    with for_(*from_array(evolution, evolution_times)):
+                        # Strict_timing ensures that the sequence will be played without gaps
+                        # with strict_timing_():   
 
-                    ################
-                    #### T2star ####
-                    ################
-                    align()
-                    # play("cw", self.resonator)
-                    # align(self.state_prep_qubit, self.resonator)
-                    play("x180", self.state_prep_qubit)
-                    align(self.state_prep_qubit, probe_qubit)
-                    play("x90", probe_qubit)
-                    wait(int(self.tau//4), probe_qubit)
-                    # play(f'xvar{int(t)}', probe_qubit)
-                    # frame_rotation_2pi(final_phase, probe_qubit)
-                    play("x90", probe_qubit)
-                    # reset_frame(probe_qubit)
-                    align()
-                    # measure along ef
-                    measure(
-                        "readout",
-                        resonator,
-                        None,
-                        dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_cases),
-                        timestamp_stream='measure_timestamps',
-                    )
-                    align()
-                    # Measure along ge
-                    measure(
-                        "readout",
-                        self.resonatorge,
-                        None,
-                        dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_ge),
-                    )
-                    # Save the 'I_e' & 'Q_e' quadratures to their respective streams
-                    save(I_cases, I_st)
-                    save(I_ge, I_ge_st)
-                    align()
-                    ################
-                    # Active reset #
-                    ################
-                    with if_(I_cases > self.threshold):
-                        play("x180", probe_qubit)
-                    with else_():
-                        wait(self.pi_length, probe_qubit)
-                    align(self.state_prep_qubit, probe_qubit)  
-                    # Only play pi on ge if the qubit is in e
-                    with if_(I_ge > self.thresholdge):                      
+                        ################
+                        #### T2star ####
+                        ################
+                        align()
+                        play("cw", self.resonatorQP)  # Amplitude is already set by cw pulse
+                        wait(self.QP_wait - (evolution + 2*int(self.tau//4) + 4*self.pi_length + self.ge_pi_length), self.resonatorQP)
+                        align()
+                        # initialize to e state
                         play("x180", self.state_prep_qubit)
-                    with else_():
-                        wait(self.ge_pi_length, self.state_prep_qubit)
+                        align(self.state_prep_qubit, probe_qubit)
+                        # perform 1st ramsey
+                        play("x90", probe_qubit)
+                        wait(int(self.tau//4), probe_qubit)
+                        play("x90", probe_qubit)
+                        # rotate the qubit frame for the next ramsey. Do it before the wait, just in case
+                        frame_rotation_2pi(random_phase, probe_qubit)
 
-                    # wait(int(self.tau), self.state_prep_qubit),
-                    # align()
-                    #(faster):
-                    # play("x180", "qubit", condition=I_cases > self.threshold)
-                    # Wait for the qubit to decay to the ground state
-                    wait(self.mc.thermalization_time * self.mc.u.ns, resonator)
+                        # Wait for the correlation time
+                        wait(evolution, probe_qubit)
+
+                        # second ramsey
+                        play("x90", probe_qubit)
+                        wait(int(self.tau//4), probe_qubit)
+                        play("x90", probe_qubit)
+                        # reset frame at the end
+                        reset_frame(probe_qubit)
+                        align()
+                        # measure along ef
+                        measure(
+                            "readout",
+                            resonator,
+                            None,
+                            dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_cases),
+                        )
+                        wait(self.mc.thermalization_time * self.mc.u.ns, self.resonator)
+                        # Save the 'I_e' & 'Q_e' quadratures to their respective streams
+                        save(I_cases, I_st)
 
                 with stream_processing():
                     # Save all streamed points for plotting the IQ blobs
-                    I_st.save_all("I")
-                    I_ge_st.save_all("Ige")
+                    I_st.buffer(len(evolution_times)).average().save("I")
 
             # exec(program_code)
             # eval(f'programs.append(multiplex_ramsey_{i_i})')
@@ -249,15 +245,11 @@ class ef_ramseycorrelation:
             res_handles = job.result_handles
             # Waits (blocks the Python console) until all results have been acquired
             res_handles.wait_for_all_values()
-            measure_timestamps = res_handles.get('measure_timestamps').fetch_all()
             I = res_handles.get("I").fetch_all()
-            Ige = res_handles.get("Ige").fetch_all()
             self.program_data_dict[job.id] = {resonator: {}}
             self.program_data_dict[job.id][resonator].update(
                 {
-                    'timestamps': measure_timestamps,
                     'I': I,
-                    'Ige': Ige,
                 }
             )
             job = self.qm.get_running_job() 
@@ -268,24 +260,19 @@ class ef_ramseycorrelation:
             # so no need to sort; they are already in job-order = tau-order
             if i_pd == 0:
                 I = np.array(data[resonator]['I'])
-                Ige = np.array(data[resonator]['Ige'])
-                timestamps = np.array(data[resonator]['timestamps'])
             else:
                 I = np.concatenate((I,np.array(data[resonator]['I'])))
-                Ige = np.concatenate((I,np.array(data[resonator]['Ige'])))
-                timestamps = np.concatenate((timestamps,np.array(data[resonator]['timestamps'])))
 
         self.data_dict[resonator].update(
             {
                 'I': I,
-                'Ige': Ige,
-                'timestamps': timestamps,
             }
         )
 
         # Save to file
+        self.multiplex_ramsey_data["correlation_tau"] = self.evolution_times
         self.multiplex_ramsey_data["measurement_data"] = self.data_dict
-        self.data_folder = self.data_handler.save_data(self.multiplex_ramsey_data, name="e_f_ramseycorrelation")
+        self.data_folder = self.data_handler.save_data(self.multiplex_ramsey_data, name="e_f_ramseycorrelation_QPFixed")
         print('Done')
 
 

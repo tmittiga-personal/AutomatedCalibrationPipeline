@@ -34,6 +34,7 @@ class ef_t2star_background:
     def __init__(
         self,        
         probe_qubit = "q3_ef",
+        inject_qp = False,
     ):
         self.mc = create_multiplexed_configuration()
         self.probe_qubit = probe_qubit
@@ -49,6 +50,7 @@ class ef_t2star_background:
         )
         
         self.resonator = 'q3_re'
+        self.inject_qp = inject_qp
 
         self.multiplex_ramsey_data = {
             "n_avg": self.n_avg,
@@ -158,6 +160,9 @@ class ef_t2star_background:
                                 #### T2star ####
                                 ################
                                 align()
+                                if self.inject_qp:                                    
+                                    play("cw", self.resonator)
+                                    align(self.state_prep_qubit, self.resonator)
                                 play("x180", self.state_prep_qubit)
                                 align(self.state_prep_qubit, probe_qubit)
                                 play("x90", probe_qubit)
@@ -542,12 +547,19 @@ class ef_t2star_background:
         self.fit_dict = fit_dict
 
 if __name__ == "__main__":
-    mr = ef_t2star_background()
+    mr = ef_t2star_background(
+        inject_qp = False,
+    )
     # while True:
     #     try:
     # for i in range(2):
     mr.run_ef_t2star_t13_t1f()
+    mriqp = ef_t2star_background(
+        inject_qp = True,
+    )
+    mriqp.run_ef_t2star_t13_t1f()
     print(mr.fit_dict)
+    print(mriqp.fit_dict)
         # except Exception as e:
         #     print(e)
         #     continue

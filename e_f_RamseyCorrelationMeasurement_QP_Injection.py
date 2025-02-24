@@ -52,6 +52,7 @@ class ef_ramseycorrelation:
         
         self.resonator = 'q3_re'
         self.resonatorge = 'q3_rr'
+        self.resonatorQP = 'q1_rr'
 
         # shift IF to address the higher parity state
         upper_f = self.f1 if self.f1 > self.f2 else self.f2
@@ -129,8 +130,9 @@ class ef_ramseycorrelation:
                     #### T2star ####
                     ################
                     align()
-                    # play("cw", self.resonator)
-                    # align(self.state_prep_qubit, self.resonator)
+                    play("cw", self.resonatorQP)  # Amplitude is already set by cw pulse
+                    wait(250_000, self.resonatorQP)
+                    align()
                     play("x180", self.state_prep_qubit)
                     align(self.state_prep_qubit, probe_qubit)
                     play("x90", probe_qubit)
@@ -160,26 +162,26 @@ class ef_ramseycorrelation:
                     save(I_cases, I_st)
                     save(I_ge, I_ge_st)
                     align()
-                    ################
-                    # Active reset #
-                    ################
-                    with if_(I_cases > self.threshold):
-                        play("x180", probe_qubit)
-                    with else_():
-                        wait(self.pi_length, probe_qubit)
-                    align(self.state_prep_qubit, probe_qubit)  
-                    # Only play pi on ge if the qubit is in e
-                    with if_(I_ge > self.thresholdge):                      
-                        play("x180", self.state_prep_qubit)
-                    with else_():
-                        wait(self.ge_pi_length, self.state_prep_qubit)
+                    # ################
+                    # # Active reset #
+                    # ################
+                    # with if_(I_cases > self.threshold):
+                    #     play("x180", probe_qubit)
+                    # with else_():
+                    #     wait(self.pi_length, probe_qubit)
+                    # align(self.state_prep_qubit, probe_qubit)  
+                    # # Only play pi on ge if the qubit is in e
+                    # with if_(I_ge > self.thresholdge):                      
+                    #     play("x180", self.state_prep_qubit)
+                    # with else_():
+                    #     wait(self.ge_pi_length, self.state_prep_qubit)
 
                     # wait(int(self.tau), self.state_prep_qubit),
                     # align()
                     #(faster):
                     # play("x180", "qubit", condition=I_cases > self.threshold)
                     # Wait for the qubit to decay to the ground state
-                    wait(self.mc.thermalization_time * self.mc.u.ns, resonator)
+                    # wait(self.mc.thermalization_time * self.mc.u.ns, resonator)
 
                 with stream_processing():
                     # Save all streamed points for plotting the IQ blobs

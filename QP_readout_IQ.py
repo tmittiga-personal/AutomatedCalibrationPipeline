@@ -36,23 +36,11 @@ MAX_ITERATIONS = 10
 def readout_amplitude_binary_search(
     qubit,
     resonator,
-    i_attempt,
     n_runs = 5_000,
 ):
     mc = create_multiplexed_configuration()
-    initial_amplitude = mc.RR_CONSTANTS[resonator]["amplitude"]
-    if i_attempt > 0: # and qubit[-2:]=='ef':
-        df = pull_latest_n_calibrated_values(
-            qubits = [qubit],
-            search_parameter_names = ['readout_amplitude'],
-            n_latest = i_attempt,
-            all_attempts = True,
-        )
-        # Loop over this round of attempts to calbirate and take an improved values
-        for ii in range(i_attempt):
-            if df['miscellaneous'].iloc[-1*(ii+1)]['results_dict']['improved']:
-                initial_amplitude = df['calibration_value'].iloc[-1*(ii+1)]
-                break
+    qp_wait = 2500 # clock cycles
+    resonatorQP = 'q1_rr'
 
 
     ###################
@@ -62,7 +50,6 @@ def readout_amplitude_binary_search(
     IQ_blobs_data = {
         "n_runs": n_runs,
         "resonator_LO": mc.RL_CONSTANTS["rl1"]["LO"],
-        "readout_amp": initial_amplitude,
         "qubit_LO": mc.MULTIPLEX_DRIVE_CONSTANTS["drive1"]["LO"],
         "qubit_IF": mc.QUBIT_CONSTANTS[qubit]["IF"],
         "ge_threshold": mc.RR_CONSTANTS[resonator]["ge_threshold"],
@@ -85,8 +72,27 @@ def readout_amplitude_binary_search(
         Q_e = declare(fixed)
         I_e_st = declare_stream()
         Q_e_st = declare_stream()
+        # QP Before
+        I_gqpb = declare(fixed)
+        Q_gqpb = declare(fixed)
+        I_g_stqpb = declare_stream()
+        Q_g_stqpb = declare_stream()
+        I_eqpb = declare(fixed)
+        Q_eqpb = declare(fixed)
+        I_e_stqpb = declare_stream()
+        Q_e_stqpb = declare_stream()
+        # QP After
+        I_gqpa = declare(fixed)
+        Q_gqpa = declare(fixed)
+        I_g_stqpa = declare_stream()
+        Q_g_stqpa = declare_stream()
+        I_eqpa = declare(fixed)
+        Q_eqpa = declare(fixed)
+        I_e_stqpa = declare_stream()
+        Q_e_stqpa = declare_stream()
 
         with for_(n, 0, n < n_runs, n + 1):
+            # No QP
             if resonator[-2:] == 're':
                 # If this is a e-f qubit
                 # State prep into e
@@ -124,6 +130,7 @@ def readout_amplitude_binary_search(
                 play("x180", qubit.replace('ef','xy'))
                 align()
             play("x180", qubit)
+            wait(qp_wait) # 10 us
             # Align the two elements to measure after playing the qubit pulse.
             align(qubit, resonator)
             # Measure the state of the resonator
@@ -150,6 +157,151 @@ def readout_amplitude_binary_search(
             save(I_e, I_e_st)
             save(Q_e, Q_e_st)
 
+            ##################
+            ### QP Before ####
+            ##################
+            
+            if resonator[-2:] == 're':
+                # If this is a e-f qubit
+                # State prep into e
+                play("x180", qubit.replace('ef','xy'))
+                align()
+            # Play QP Injection
+            play("cw", resonatorQP)  # Amplitude is already set by cw pulse
+            wait(qp_wait) # 10 us
+
+            if OPTIMIZED_READOUT:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_gqpb),
+                    dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_gqpb),
+                )
+            else:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_gqpb),
+                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_gqpb),
+                )
+            # Wait for the qubit to decay to the ground state in the case of measurement induced transitions
+            wait(mc.thermalization_time * mc.u.ns, resonator)
+            # Save the 'I' & 'Q' quadratures to their respective streams for the ground state
+            save(I_gqpb, I_g_stqpb)
+            save(Q_gqpb, Q_g_stqpb)
+
+            align()  # global align
+            # Play the x180 gate to put the qubit in the excited state
+
+            if resonator[-2:] == 're':
+                # If this is a e-f qubit
+                # State prep into e
+                play("x180", qubit.replace('ef','xy'))
+                align()
+            play("x180", qubit)
+            # Play QP Injection
+            play("cw", resonatorQP)  # Amplitude is already set by cw pulse
+            wait(qp_wait) # 10 us
+            # Align the two elements to measure after playing the qubit pulse.
+            align(qubit, resonator)
+            # Measure the state of the resonator
+            if OPTIMIZED_READOUT:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_eqpb),
+                    dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_eqpb),
+                )
+            else:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_eqpb),
+                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_eqpb),
+                )
+
+            # Wait for the qubit to decay to the ground state
+            wait(2*mc.thermalization_time * mc.u.ns, resonator)
+            # Save the 'I' & 'Q' quadratures to their respective streams for the excited state
+            save(I_eqpb, I_e_stqpb)
+            save(Q_eqpb, Q_e_stqpb)
+
+            #################
+            ### QP After ####
+            #################
+            
+            if resonator[-2:] == 're':
+                # If this is a e-f qubit
+                # State prep into e
+                play("x180", qubit.replace('ef','xy'))
+                align()
+            # Play QP Injection
+            play("cw", resonatorQP)  # Amplitude is already set by cw pulse
+            wait(qp_wait) # 10 us
+
+            if OPTIMIZED_READOUT:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_gqpa),
+                    dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_gqpa),
+                )
+            else:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_gqpa),
+                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_gqpa),
+                )
+            # Wait for the qubit to decay to the ground state in the case of measurement induced transitions
+            wait(mc.thermalization_time * mc.u.ns, resonator)
+            # Save the 'I' & 'Q' quadratures to their respective streams for the ground state
+            save(I_gqpa, I_g_stqpa)
+            save(Q_gqpa, Q_g_stqpa)
+
+            align()  # global align
+            # Play the x180 gate to put the qubit in the excited state
+
+            if resonator[-2:] == 're':
+                # If this is a e-f qubit
+                # State prep into e
+                play("x180", qubit.replace('ef','xy'))
+                align()
+            play("x180", qubit)
+            # Play QP Injection
+            play("cw", resonatorQP)  # Amplitude is already set by cw pulse
+            wait(qp_wait) # 10 us
+            # Align the two elements to measure after playing the qubit pulse.
+            align(qubit, resonator)
+            # Measure the state of the resonator
+            if OPTIMIZED_READOUT:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I_eqpa),
+                    dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q_eqpa),
+                )
+            else:
+                measure(
+                    f"readout",
+                    resonator,
+                    None,
+                    dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I_eqpa),
+                    dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q_eqpa),
+                )
+
+            # Wait for the qubit to decay to the ground state
+            wait(2*mc.thermalization_time * mc.u.ns, resonator)
+            # Save the 'I' & 'Q' quadratures to their respective streams for the excited state
+            save(I_eqpa, I_e_stqpa)
+            save(Q_eqpa, Q_e_stqpa)
         with stream_processing():
             # Save all streamed points for plotting the IQ blobs
             I_g_st.save_all("I_g")

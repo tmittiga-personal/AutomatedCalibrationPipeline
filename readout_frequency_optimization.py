@@ -142,7 +142,7 @@ def readout_frequency_optimization(
     ###################
     # The QUA program #
     ###################
-    n_avg = 4000  # The number of averages
+    n_avg = 2000  # The number of averages
     # The frequency sweep parameters
     span = 1 * mc.u.MHz
     df = 60 * mc.u.kHz

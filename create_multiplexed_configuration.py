@@ -26,6 +26,12 @@ class multiplexed_configuation_class:
         variables (ie var) that are used only within this script. See the definition of u for an example.
 
         """
+        #######################
+        # AUXILIARY FUNCTIONS #
+        #######################
+        self.u = unit(coerce_to_integer=True)  # instance variable called outside this script
+        u = self.u  # local variable used within this script
+
         if use_calibrated_values:
             calibration_dataframe = pull_latest_calibrated_values(
                 qubits=ALL_QUBIT_NAMES,
@@ -47,9 +53,9 @@ class multiplexed_configuation_class:
             # },
         }
         OVERRIDE_RR_CONSTANTS = {
-            "q3_rr": {
-                # "amplitude": 0.006926810565831467,
-                # "IF": 92.25*1e6
+            "q1_rr": {
+                # "amplitude": 0.1,
+                "IF": 156.0916*u.MHz,
             },
             "q3_re": {
                 # "amplitude": 0.0020826678827023694,
@@ -60,13 +66,6 @@ class multiplexed_configuation_class:
             #     "IF": 2.111 * 1e8
             # }
         }
-
-
-        #######################
-        # AUXILIARY FUNCTIONS #
-        #######################
-        self.u = unit(coerce_to_integer=True)  # instance variable called outside this script
-        u = self.u  # local variable used within this script
 
 
         ######################
@@ -107,9 +106,9 @@ class multiplexed_configuation_class:
         # OPX configuration #
         #####################
         # CW pulse parameter
-        self.const_len = 10000
+        self.const_len = 5_000
         const_len = self.const_len
-        self.const_amp = 0.5 #125 * u.mV
+        self.const_amp = 0.3#125 * u.mV
         const_amp = self.const_amp
 
         ########

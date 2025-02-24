@@ -8,7 +8,7 @@ TODO: Use asyncio to permit running this script in the background and interleavi
 
 from calibration_nodes import *
 import time
-from e_f_RamseyCorrelationMeasurement_2stepReadout import ef_ramseycorrelation
+from e_f_RamseyCorrelationMeasurement_QP_Injection_FixedTime_ import ef_ramseycorrelation
 
 CALIBRATION_QUBITS = ["q3_xy"] #"q3_xy", "q1_xy", 
 CALIBRATION_TIME_WINDOW = [datetime.strptime("17:00", "%H:%M").time(), datetime.strptime("17:00", "%H:%M").time()]
@@ -163,31 +163,31 @@ if __name__ == "__main__":
 
             resonator_amplitude_node.calibrate(initialize=initialize_bool)
             
-            parity_beat_node.calibrate()
+            fbeat = 21
+            t2 = 1e6
+            i_meas = 0
 
             try:
-                df = parity_beat_node.loaded_database
-                mval = df['miscellaneous'].values[-1]
-                f1 = mval['fit_dict']['frequency1']
-                f2 = mval['fit_dict']['frequency2']
-                t2 = mval['fit_dict']['T2star']
-                fbeat = np.abs(f1-f2)*1e6
-                # If parity beat is over threshold and T2* is long enough to measure it.
-                if fbeat > 20 and t2*1e-6 > 1.2/fbeat:
-                    # pr = ef_ramseyspinlock(
-                    #     f1 = f1,     
-                    #     f2 = f2,
-                    #     probe_qubit = 'q3_ef',
-                    # )
-                    # pr.run_ef_ramseyspinlock()
-                    mr = ef_ramseycorrelation(
-                        f1 = f1,
-                        f2 = f2,
-                    )
-                    mr.run_ef_ramseycorrelation()
-                else:
-                    print(f'{fbeat=}')
-                    print(f'{t2*1e-6=}')
+                while fbeat > 20 and t2*1e-6 > 1.2/fbeat and i_meas < 10: 
+                    parity_beat_node.calibrate()
+
+                    df = parity_beat_node.loaded_database
+                    mval = df['miscellaneous'].values[-1]
+                    f1 = mval['fit_dict']['frequency1']
+                    f2 = mval['fit_dict']['frequency2']
+                    t2 = mval['fit_dict']['T2star']
+                    fbeat = np.abs(f1-f2)*1e6
+                    # If parity beat is over threshold and T2* is long enough to measure it.
+                    if fbeat > 20 and t2*1e-6 > 1.2/fbeat:
+                        mr = ef_ramseycorrelation(
+                            f1 = f1,
+                            f2 = f2,
+                        )
+                        mr.run_ef_ramseycorrelation()
+                    else:
+                        print(f'{fbeat=}')
+                        print(f'{t2*1e-6=}')
+                    i_meas +=1
             
             except:
                 print('Failure')
@@ -196,5 +196,5 @@ if __name__ == "__main__":
 
             # iq_blobs_node.calibrate()
 
-            time.sleep(5*60)  # probe if a calibration is needed every 60 seconds
+            time.sleep(60)  # probe if a calibration is needed every 60 seconds
         

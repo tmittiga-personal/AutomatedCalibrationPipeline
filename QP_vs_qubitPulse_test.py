@@ -35,16 +35,18 @@ class Ramsey_w_virtual_rotation:
     def __init__(
         self, 
         qubit: str,
-        n_avg: int = 5000,
+        n_avg: int = 250,
         detuning: float = 2e6,  # in Hz
         taus: np.typing.NDArray = DEFAULT_TAUS,
     ):
         self.mc = create_multiplexed_configuration()
         self.qubit = qubit
         self.resonator = self.mc.qubit_resonator_correspondence[self.qubit]
+        self.resonatorQP = 'q1_rr'
         self.n_avg = n_avg
         self.detuning = detuning
         self.taus = taus
+        self.wait = 75_000 # in clock cycles = 4ns
 
     def ramsey_w_virtual_rotation(
         self,
@@ -84,7 +86,6 @@ class Ramsey_w_virtual_rotation:
         with program() as ramsey:
             n = declare(int)  # QUA variable for the averaging loop
             tau = declare(int)  # QUA variable for the idle time
-            phase = declare(fixed)  # QUA variable for dephasing the second pi/2 pulse (virtual Z-rotation)
             I = declare(fixed)  # QUA variable for the measured 'I' quadrature
             Q = declare(fixed)  # QUA variable for the measured 'Q' quadrature
             state = declare(bool)  # QUA variable for the qubit state
@@ -97,55 +98,75 @@ class Ramsey_w_virtual_rotation:
                 with for_(*from_array(tau, taus)): #for_each_(tau, taus): #for_(*from_array(tau, taus)):
                     # Rotate the frame of the second x90 gate to implement a virtual Z-rotation
                     # 4*tau because tau was in clock cycles and 1e-9 because tau is ns
-                    assign(phase, Cast.mul_fixed_by_int(detuning * 1e-9, 4 * tau))
                     # Strict_timing ensures that the sequence will be played without gaps
-                    with strict_timing_():
-                        # 1st x90 gate
-                        play("x90", self.qubit)
-                        # Wait a varying idle time
-                        wait(tau, self.qubit)
-                        # Rotate the frame of the second x90 gate to implement a virtual Z-rotation
-                        frame_rotation_2pi(phase, self.qubit)
-                        # 2nd x90 gate
-                        play("x90", self.qubit)
+                    # with strict_timing_():
+                    # play("cw", self.resonator)
+                    align()
+                    play("cw", self.resonatorQP)
+                    wait(self.wait, self.resonatorQP)
+                    align()
+                    # 1st x90 gate
+                    play("x180", self.qubit)
+                    # Wait a varying idle time
+                    wait(tau, self.qubit)
                     # Align the two elements to measure after playing the qubit pulse.
                     align(self.qubit, self.resonator)
                     # Measure the state of the resonator
-                    if self.mc.RR_CONSTANTS[self.resonator]["use_opt_readout"]:
-                        measure(
-                            "readout",
-                            self.resonator,
-                            None,
-                            dual_demod.full("opt_cos", "out1", "opt_sin", "out2", I),
-                            dual_demod.full("opt_minus_sin", "out1", "opt_cos", "out2", Q),
-                        )
-                    else:
-                        measure(
-                            "readout",
-                            self.resonator,
-                            None,
-                            dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I),
-                            dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q),
-                        )
+                    measure(
+                        "readout",
+                        self.resonator,
+                        None,
+                        dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I),
+                        dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q),
+                    )
                     
                     # Wait for the qubit to decay to the ground state
-                    wait(self.mc.thermalization_time * self.mc.u.ns, self.resonator)
+                    wait(5*self.mc.thermalization_time * self.mc.u.ns, self.resonator)
                     # State discrimination
                     assign(state, I > self.mc.RR_CONSTANTS[self.resonator]['ge_threshold'])
                     # Save the 'I', 'Q' and 'state' to their respective streams
                     save(I, I_st)
                     save(Q, Q_st)
                     save(state, state_st)
-                    # Reset the frame of the qubit in order not to accumulate rotations
-                    reset_frame(self.qubit)
+
+                    align()
+                    ##############################
+                    #### Inject Quasiparticles ###
+                    ##############################
+                    play("cw", self.resonatorQP)
+                    wait(self.wait-tau, self.resonatorQP)
+                    align()
+                    # 1st x90 gate
+                    play("x180", self.qubit)
+                    # Wait a varying idle time
+                    wait(tau, self.qubit)
+                    # Align the two elements to measure after playing the qubit pulse.
+                    align(self.qubit, self.resonator)
+                    # Measure the state of the resonator
+                    measure(
+                        "readout",
+                        self.resonator,
+                        None,
+                        dual_demod.full("rotated_cos", "out1", "rotated_sin", "out2", I),
+                        dual_demod.full("rotated_minus_sin", "out1", "rotated_cos", "out2", Q),
+                    )
+                    
+                    # Wait for the qubit to decay to the ground state
+                    wait(5*self.mc.thermalization_time * self.mc.u.ns, self.resonator)
+                    # State discrimination
+                    assign(state, I > self.mc.RR_CONSTANTS[self.resonator]['ge_threshold'])
+                    # Save the 'I', 'Q' and 'state' to their respective streams
+                    save(I, I_st)
+                    save(Q, Q_st)
+                    save(state, state_st)
                 # Save the averaging iteration to get the progress bar
                 save(n, n_st)
 
             with stream_processing():
                 # Cast the data into a 1D vector, average the 1D vectors together and store the results on the OPX processor
-                I_st.buffer(len(taus)).average().save("I")
-                Q_st.buffer(len(taus)).average().save("Q")
-                state_st.boolean_to_int().buffer(len(taus)).average().save("state")
+                I_st.buffer(2).buffer(len(taus)).average().save("I")
+                Q_st.buffer(2).buffer(len(taus)).average().save("Q")
+                state_st.boolean_to_int().buffer(2).buffer(len(taus)).average().save("state")
                 n_st.save("iteration")
 
         #####################################
@@ -179,27 +200,35 @@ class Ramsey_w_virtual_rotation:
             while results.is_processing():
                 # Fetch results
                 I, Q, state, iteration = results.fetch_all()
+                I = I.transpose()
+                Q = Q.transpose()
                 # Convert the results into Volts
                 I = self.mc.u.demod2volts(I, self.mc.RR_CONSTANTS[self.resonator]["readout_length"])
                 Q = self.mc.u.demod2volts(Q, self.mc.RR_CONSTANTS[self.resonator]["readout_length"])
+                state = state.transpose()
+
                 # Progress bar
                 progress_counter(iteration, n_avg, start_time=results.get_start_time())
                 # Plot results
                 plt.suptitle(f"Ramsey with frame rotation (detuning={detuning / self.mc.u.MHz} MHz)")
                 plt.subplot(311)
                 plt.cla()
-                plt.plot(4 * taus, I, ".")
+                plt.plot(4 * taus, I[0], ".", label = f'{self.wait*4}ns Wait')
+                plt.plot(4 * taus, I[1], ".", label = f'{self.wait*4}ns Fixed')
                 plt.ylabel("I quadrature [V]")
                 plt.subplot(312)
                 plt.cla()
-                plt.plot(4 * taus, Q, ".")
+                plt.plot(4 * taus, Q[0], ".", label = f'{self.wait*4}ns Wait')
+                plt.plot(4 * taus, Q[1], ".", label = f'{self.wait*4}ns Fixed')
                 plt.ylabel("Q quadrature [V]")
                 plt.subplot(313)
                 plt.cla()
-                plt.plot(4 * taus, state, ".")
+                plt.plot(4 * taus, state[0], ".", label = f'{self.wait*4}ns Wait')
+                plt.plot(4 * taus, state[1], ".", label = f'{self.wait*4}ns Fixed')
                 plt.ylim((0, 1))
                 plt.xlabel("Idle time [ns]")
                 plt.ylabel("State")
+                plt.legend()
                 plt.pause(0.1)
                 plt.tight_layout()
             ramsey_w_virtual_rotation_data["figure"] = fig
@@ -209,7 +238,6 @@ class Ramsey_w_virtual_rotation:
             fit_dict = {}
             from qualang_tools.plot.fitting import Fit
 
-            fit = Fit()
             fig2 = plt.figure()
             
             # Pick higher contrast data for fit
@@ -222,45 +250,65 @@ class Ramsey_w_virtual_rotation:
                 fit_data = Q
                 y_label = "Q quadrature [V]"
 
-            ramsey_fit = fit.ramsey(4 * taus, fit_data, plot=True)
-            qubit_T2 = np.abs(ramsey_fit["T2"][0])
-            qubit_detuning = ramsey_fit["f"][0] * self.mc.u.GHz - detuning
+            fit = Fit()
+            ramsey_fit = fit.T1(4 * taus, state[0], plot=True)
+            qubit_T2 = np.abs(ramsey_fit["T1"][0])
+            fit2 = Fit()
+            ramsey_fit2 = fit2.T1(4 * taus, state[1], plot=True)
+            qubit_T1 = np.abs(ramsey_fit2["T1"][0])
             plt.xlabel("Idle time [ns]")
             plt.ylabel(y_label)
-            print(f"Qubit detuning to update in the config: qubit_IF += {-qubit_detuning:.0f} Hz")
-            print(f"T2* = {qubit_T2:.0f} ns")
-            plt.legend((f"detuning = {-qubit_detuning / self.mc.u.kHz:.3f} kHz", f"T2* = {qubit_T2:.0f} ns"))
-            plt.title("Ramsey measurement with virtual Z rotations")
-            print(f"Detuning to add: {-qubit_detuning / self.mc.u.kHz:.3f} kHz")
+            print(f"T1 = {qubit_T2:.0f} ns")
+            print(f"T1 = {qubit_T1:.0f} ns")
+            plt.legend((f"T1 = {qubit_T2:.0f} ns"))
+            plt.title("T1")
             fit_dict = {
-                'qubit_detuning': -qubit_detuning,
                 'fit_values': {
-                    'frequency': ramsey_fit["f"][0],
-                    'phase':ramsey_fit['phase'][0],
                     'amp': ramsey_fit['amp'][0],
-                    'qubit_T2': qubit_T2,
-                    'initial_offset': ramsey_fit['initial_offset'][0],
+                    'qubit_T1': qubit_T2,
                     'final_offset': ramsey_fit['final_offset'][0],
+                    'ampInject': ramsey_fit2['amp'][0],
+                    'qubit_T1Inject': qubit_T1,
+                    'final_offsetInject': ramsey_fit2['final_offset'][0],
                 },
                 'fit_uncertainties': {
-                    'frequency': ramsey_fit["f"][1],
-                    'phase':ramsey_fit['phase'][1],
                     'amp': ramsey_fit['amp'][1],
-                    'qubit_T2': qubit_T2,
-                    'initial_offset': ramsey_fit['initial_offset'][1],
+                    'qubit_T2': ramsey_fit['T1'][1],
                     'final_offset': ramsey_fit['final_offset'][1],
+                    'ampInject': ramsey_fit2['amp'][1],
+                    'qubit_T2Inject': ramsey_fit2['T1'][1],
+                    'final_offsetInject': ramsey_fit2['final_offset'][1],
                 },
 
             }
-            ramsey_w_virtual_rotation_data["qubit_T2"] = qubit_T2
-            ramsey_w_virtual_rotation_data["qubit_detuning"] = qubit_detuning
+            ramsey_w_virtual_rotation_data["qubit_T1"] = qubit_T2
+            ramsey_w_virtual_rotation_data["qubit_T1_injection"] = qubit_T1
+            ramsey_w_virtual_rotation_data["fit_dict"] = fit_dict
             ramsey_w_virtual_rotation_data["I"] = I
             ramsey_w_virtual_rotation_data["Q"] = Q
+            ramsey_w_virtual_rotation_data["state"] = state
             ramsey_w_virtual_rotation_data["figure2"] = fig2
             data_folder = data_handler.save_data(
                 ramsey_w_virtual_rotation_data, 
-                name=f"{self.qubit}_ramsey_w_virtual_rotation"
+                name=f"{self.qubit}_T1_vs_quasiparticle"
             )
             plt.close()
-            cal_val = self.mc.QUBIT_CONSTANTS[self.qubit]["IF"] + fit_dict['qubit_detuning']
-            return cal_val, fit_dict, data_folder
+            return fit_dict, data_folder
+
+
+if __name__ == "__main__":
+    mr = Ramsey_w_virtual_rotation(
+        'q3_xy',
+        # taus = np.arange(4, 540 , 16)
+        # taus = np.arange(4, 51240//4 , (540)//2)
+        taus = np.arange(4, 101240//4 , (1240)//2)
+        # taus = np.arange(251240//4, 251240//4+540 , 16)
+        # taus = np.arange(4, 501240//4 , (5240)//2)
+    )
+    # while True:
+        # try:
+    # for i in range(2):
+    mr.ramsey_w_virtual_rotation()
+        # except Exception as e:
+        #     print(e)
+        #     continue

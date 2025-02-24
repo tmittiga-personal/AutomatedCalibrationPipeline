@@ -500,7 +500,7 @@ class Qubit_Frequency_Node(Node):
         expiration_time: float,
         retry_time: float,
         fresh: bool = False,
-        n_avg: int = 1000,
+        n_avg: int = 500,
         detuning: float = 2* Node.multiplexed_config.u.MHz,  # in Hz
         taus: np.typing.NDArray = DEFAULT_TAUS,
     ):
